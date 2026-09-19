@@ -1,0 +1,19 @@
+{
+  "name": "stremio-newsdata-addon",
+  "version": "1.0.0",
+  "description": "Stremio addon that surfaces live news from newsdata.io as configurable topic catalogs, searchable from within Stremio.",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "license": "MIT",
+  "author": "deejay189393",
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}
