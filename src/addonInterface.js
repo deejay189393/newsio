@@ -1,6 +1,6 @@
 const { addonBuilder, getRouter } = require("stremio-addon-sdk");
 const { buildInterfaceManifest } = require("./manifest");
-const { getTopicById } = require("./topics");
+const { getTopicById, VALID_LANGUAGE_CODES } = require("./topics");
 const { fetchNews, getArticleById } = require("./newsdata");
 const { toMetaPreview, toFullMeta, toStreams } = require("./stremioMeta");
 
@@ -11,6 +11,16 @@ const { toMetaPreview, toFullMeta, toStreams } = require("./stremioMeta");
  * dispatch, 404/500 behaviour) is handled by the SDK's own getRouter
  * rather than a hand-rolled reimplementation of the addon protocol.
  */
+/**
+ * The SDK parses the config path segment as raw JSON and hands it straight
+ * to the handlers, without the validation our own manifest route applies.
+ * A hand-edited install URL can therefore carry anything, so normalize the
+ * language here too rather than forwarding an unknown code upstream.
+ */
+function safeLanguage(language) {
+  return typeof language === "string" && VALID_LANGUAGE_CODES.has(language) ? language : "en";
+}
+
 function createAddonInterface() {
   const builder = new addonBuilder(buildInterfaceManifest());
 
@@ -32,7 +42,7 @@ function createAddonInterface() {
         // category filter is dropped while searching.
         category: searchQuery ? undefined : topic.category,
         query: searchQuery,
-        language: config.language,
+        language: safeLanguage(config.language),
         skip
       });
       return { metas: articles.map(toMetaPreview), cacheMaxAge: 600 };

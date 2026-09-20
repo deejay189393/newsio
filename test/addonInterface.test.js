@@ -44,6 +44,18 @@ describe("catalog handler", () => {
     expect(new URL(global.fetch.mock.calls[0][0]).searchParams.get("language")).toBe("ja");
   });
 
+  test("falls back to English when a hand-edited URL carries an unknown language", async () => {
+    global.fetch = jest.fn().mockResolvedValue(ok({ results: [], nextPage: null }));
+    await iface.get("catalog", "news", "technology", {}, { apiKey: "k", language: "zz-not-real" });
+    expect(new URL(global.fetch.mock.calls[0][0]).searchParams.get("language")).toBe("en");
+  });
+
+  test("falls back to English when the language is a non-string", async () => {
+    global.fetch = jest.fn().mockResolvedValue(ok({ results: [], nextPage: null }));
+    await iface.get("catalog", "news", "technology", {}, { apiKey: "k", language: 42 });
+    expect(new URL(global.fetch.mock.calls[0][0]).searchParams.get("language")).toBe("en");
+  });
+
   test("returns empty metas for an unknown topic id", async () => {
     expect((await iface.get("catalog", "news", "not-a-topic", {}, CONFIG)).metas).toEqual([]);
   });

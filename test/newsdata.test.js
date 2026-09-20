@@ -254,6 +254,29 @@ describe("fetchNews", () => {
     expect(global.fetch).not.toHaveBeenCalled(); // refuses to burn the rate limit
   });
 
+  test("does not replay page 0 when paging past a page already known to be the last", async () => {
+    // Regression: a cached cursor of null means "no page after this one".
+    // It must end pagination, not be carried forward as "no cursor" -- which
+    // would refetch page 0 and serve it as page 1 (duplicate headlines the
+    // moment a user scrolls past the end of a single-page topic).
+    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("a1")], nextPage: null }));
+    const p0 = await fetchNews({ apiKey: "k", category: "top", skip: 0 });
+    expect(p0.articles.map((a) => a.id)).toEqual(["nd_a1"]);
+    global.fetch.mockClear();
+
+    const p1 = await fetchNews({ apiKey: "k", category: "top", skip: PAGE_SIZE });
+    expect(p1.articles).toEqual([]);
+    expect(p1.hasMore).toBe(false);
+    expect(global.fetch).not.toHaveBeenCalled(); // and it costs no upstream call
+  });
+
+  test("ends pagination for any page beyond a known-last page, not just the next one", async () => {
+    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("a1")], nextPage: null }));
+    await fetchNews({ apiKey: "k", category: "top", skip: 0 });
+    const far = await fetchNews({ apiKey: "k", category: "top", skip: PAGE_SIZE * 3 });
+    expect(far.articles).toEqual([]);
+  });
+
   test("stops gracefully when upstream runs out of pages mid-walk", async () => {
     global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("a1")], nextPage: null }));
     const res = await fetchNews({ apiKey: "k", category: "top", skip: PAGE_SIZE });
