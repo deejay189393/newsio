@@ -1,11 +1,19 @@
-const { TOPICS } = require("./topics");
-
-const VALID_TOPIC_IDS = new Set(TOPICS.map((t) => t.id));
+const { isValidTopicId, VALID_LANGUAGE_CODES } = require("./topics");
 
 /**
- * Encode a config object {apiKey, topics, language} into a URL-safe string
- * that Stremio will carry around as the first path segment of every
- * addon request, e.g. /<config>/manifest.json
+ * User configuration is carried in the URL as the first path segment,
+ * exactly the way stremio-addon-sdk's own getRouter expects it: a JSON
+ * object, percent-encoded as a single path segment, i.e.
+ *
+ *     encodeURIComponent(JSON.stringify({ apiKey, topics, language }))
+ *     -> /%7B%22apiKey%22...%7D/manifest.json
+ *
+ * Using the SDK's native convention (rather than a bespoke base64 scheme)
+ * means the SDK router decodes and JSON.parses the segment for us on the
+ * catalog/meta/stream routes and hands each handler a real `config` object.
+ *
+ * Nothing is persisted server-side: the user's key lives only inside their
+ * own personal addon URL.
  */
 function encodeConfig(config) {
   const json = JSON.stringify({
@@ -13,32 +21,43 @@ function encodeConfig(config) {
     topics: Array.isArray(config.topics) ? config.topics : [],
     language: config.language || "en"
   });
-  return Buffer.from(json, "utf8").toString("base64url");
+  return encodeURIComponent(json);
 }
 
 /**
- * Decode a config string back into an object. Returns null if it can't be
- * parsed or doesn't look like a config at all (lets callers fall back to
- * treating the segment as something else, e.g. "manifest.json" itself).
+ * Decode a config path segment into a validated object, or null if it is
+ * missing / not JSON / not our shape. Accepts the segment either still
+ * percent-encoded or already decoded (Express decodes route params for us),
+ * so the same helper works from both the HTTP layer and tests.
  */
-function decodeConfig(str) {
-  if (!str) return null;
+function decodeConfig(raw) {
+  if (!raw) return null;
+
+  let parsed;
   try {
-    const json = Buffer.from(str, "base64url").toString("utf8");
-    const parsed = JSON.parse(json);
-    if (typeof parsed !== "object" || parsed === null) return null;
-
-    const topics = Array.isArray(parsed.topics)
-      ? parsed.topics.filter((t) => VALID_TOPIC_IDS.has(t))
-      : [];
-
-    return {
-      apiKey: typeof parsed.apiKey === "string" ? parsed.apiKey.trim() : "",
-      topics,
-      language: typeof parsed.language === "string" && parsed.language ? parsed.language : "en"
-    };
+    parsed = JSON.parse(maybeDecode(raw));
   } catch (err) {
     return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+
+  const topics = Array.isArray(parsed.topics) ? parsed.topics.filter(isValidTopicId) : [];
+  const language =
+    typeof parsed.language === "string" && VALID_LANGUAGE_CODES.has(parsed.language) ? parsed.language : "en";
+
+  return {
+    apiKey: typeof parsed.apiKey === "string" ? parsed.apiKey.trim() : "",
+    topics,
+    language
+  };
+}
+
+function maybeDecode(raw) {
+  try {
+    return decodeURIComponent(raw);
+  } catch (err) {
+    // Contains a literal % that isn't a valid escape -- already decoded.
+    return raw;
   }
 }
 

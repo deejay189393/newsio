@@ -1,7 +1,7 @@
 {
-  "name": "stremio-newsdata-addon",
-  "version": "1.0.0",
-  "description": "Stremio addon that surfaces live news from newsdata.io as configurable topic catalogs, searchable from within Stremio.",
+  "name": "newsio",
+  "version": "0.1.0",
+  "description": "Stremio addon: live news from newsdata.io as configurable, searchable topic catalogs.",
   "main": "server.js",
   "type": "commonjs",
   "engines": {
@@ -9,11 +9,43 @@
   },
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "test": "jest",
+    "test:coverage": "jest --coverage"
   },
+  "keywords": [
+    "stremio",
+    "stremio-addon",
+    "news",
+    "newsdata"
+  ],
   "license": "MIT",
   "author": "deejay189393",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/deejay189393/newsio.git"
+  },
   "dependencies": {
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "stremio-addon-sdk": "^1.6.10"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "collectCoverageFrom": [
+      "src/**/*.js",
+      "server.js"
+    ],
+    "coverageThreshold": {
+      "global": {
+        "statements": 100,
+        "branches": 100,
+        "functions": 100,
+        "lines": 100
+      }
+    }
   }
 }

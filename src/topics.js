@@ -1,6 +1,7 @@
-// Topics offered on the configuration page.
+// Topics offered on the configuration page. Each one the user selects
+// becomes its own catalog in Stremio, named after the topic's label.
 // `category` is the value sent to newsdata.io's `category` query param.
-// See: https://newsdata.io/documentation/#latest-news (category field)
+// See: https://newsdata.io/documentation (category field)
 const TOPICS = [
   { id: "top", category: "top", label: "Top Stories" },
   { id: "world", category: "world", label: "World" },
@@ -27,7 +28,11 @@ function getTopicById(id) {
   return TOPICS_BY_ID.get(id);
 }
 
-// A handful of common languages supported by newsdata.io.
+function isValidTopicId(id) {
+  return TOPICS_BY_ID.has(id);
+}
+
+// Languages supported by newsdata.io (common subset).
 const LANGUAGES = [
   { code: "en", label: "English" },
   { code: "de", label: "German" },
@@ -44,4 +49,6 @@ const LANGUAGES = [
   { code: "ko", label: "Korean" }
 ];
 
-module.exports = { TOPICS, getTopicById, LANGUAGES };
+const VALID_LANGUAGE_CODES = new Set(LANGUAGES.map((l) => l.code));
+
+module.exports = { TOPICS, getTopicById, isValidTopicId, LANGUAGES, VALID_LANGUAGE_CODES };
