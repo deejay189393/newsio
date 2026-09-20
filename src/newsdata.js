@@ -1,53 +1,28 @@
+const { catalogCache, articleCache, pageCursorCache } = require("./cache");
+
 const BASE_URL = "https://newsdata.io/api/1/latest";
+const PAGE_SIZE = 10; // newsdata.io returns up to 10 articles per request on the free tier
+const MAX_PAGE_WALK = 5; // cap on sequential upstream calls needed to reach a deep "skip"
 
-// Very small in-memory cache to stay well within newsdata.io's rate limits.
-// Keyed by the full request (topic + query + language + page).
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-const cache = new Map();
-
-// Cache of individual articles, populated whenever a catalog request runs,
-// so that /meta and /stream lookups (which only receive an id) can find the
-// full article again without another API call.
-const articleCache = new Map();
-const ARTICLE_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
-
-function cacheGet(key) {
-  const hit = cache.get(key);
-  if (!hit) return null;
-  if (Date.now() > hit.expires) {
-    cache.delete(key);
-    return null;
-  }
-  return hit.value;
-}
-
-function cacheSet(key, value) {
-  cache.set(key, { value, expires: Date.now() + CACHE_TTL_MS });
-}
-
-function rememberArticle(article) {
-  articleCache.set(article.id, { article, expires: Date.now() + ARTICLE_CACHE_TTL_MS });
-}
-
-function getRememberedArticle(id) {
-  const hit = articleCache.get(id);
-  if (!hit) return null;
-  if (Date.now() > hit.expires) {
-    articleCache.delete(id);
-    return null;
-  }
-  return hit.article;
-}
-
+/**
+ * Build our Stremio-facing id for an article.
+ *
+ * Stability matters: Stremio stores these ids in its library/history and
+ * will ask us for /meta and /stream by id long after the catalog request
+ * that first surfaced the item. newsdata.io's own `article_id` is stable
+ * per story, so we use it verbatim behind an "nd_" prefix (which also
+ * matches the manifest's idPrefixes, so Stremio only routes these ids to
+ * us). The link/title fallback is deterministic too, so the same story
+ * always hashes to the same id rather than a random one.
+ */
 function makeArticleId(raw) {
-  // newsdata.io's article_id is already unique & url-safe enough for our use.
-  return `nd_${raw}`;
+  const source = raw.article_id || Buffer.from(raw.link || raw.title || "", "utf8").toString("base64url");
+  return `nd_${source}`;
 }
 
 function normalizeArticle(raw) {
-  const id = makeArticleId(raw.article_id || Buffer.from(raw.link || raw.title).toString("base64url"));
   return {
-    id,
+    id: makeArticleId(raw),
     title: raw.title || "Untitled",
     description: raw.description || raw.content || "",
     link: raw.link,
@@ -61,32 +36,16 @@ function normalizeArticle(raw) {
   };
 }
 
-/**
- * Fetch a page of news for a given topic (or a free-text search query).
- * Throws an Error with a `.status` property on HTTP-level failures so
- * callers can translate that into a sensible Stremio-facing response.
- */
-async function fetchNews({ apiKey, category, query, language, page }) {
-  if (!apiKey) {
-    const err = new Error("Missing newsdata.io API key");
-    err.status = 401;
-    throw err;
-  }
+function rememberArticles(articles) {
+  articles.forEach((a) => articleCache.set(a.id, a));
+  return articles;
+}
 
-  const cacheKey = JSON.stringify({ category: category || null, query: query || null, language, page: page || null });
-  const cached = cacheGet(cacheKey);
-  if (cached) return cached;
-
+async function callNewsdata(params) {
   const url = new URL(BASE_URL);
-  url.searchParams.set("apikey", apiKey);
-  url.searchParams.set("language", language || "en");
-  if (category && category !== "top") {
-    url.searchParams.set("category", category);
-  } else if (category === "top") {
-    url.searchParams.set("category", "top");
-  }
-  if (query) url.searchParams.set("q", query);
-  if (page) url.searchParams.set("page", page);
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, value);
+  });
 
   let response;
   try {
@@ -101,23 +60,122 @@ async function fetchNews({ apiKey, category, query, language, page }) {
     let bodyMessage = "";
     try {
       const body = await response.json();
-      bodyMessage = body?.results?.message || body?.message || "";
+      bodyMessage = (body && body.results && body.results.message) || (body && body.message) || "";
     } catch (_) {
-      /* ignore body parse errors */
+      /* body wasn't JSON -- fall through to a generic message */
     }
     const err = new Error(bodyMessage || `newsdata.io returned HTTP ${response.status}`);
     err.status = response.status;
     throw err;
   }
 
-  const data = await response.json();
-  const results = Array.isArray(data.results) ? data.results : [];
-  const articles = results.map(normalizeArticle);
-  articles.forEach(rememberArticle);
-
-  const value = { articles, nextPage: data.nextPage || null };
-  cacheSet(cacheKey, value);
-  return value;
+  return response.json();
 }
 
-module.exports = { fetchNews, getRememberedArticle };
+/**
+ * Fetch one logical page (PAGE_SIZE articles) for a topic or search query,
+ * translating Stremio's numeric `skip` into newsdata.io's opaque cursor
+ * pagination.
+ *
+ * newsdata.io can't jump to an arbitrary offset -- each response only
+ * carries the token for the *next* page. So reaching page N means having
+ * fetched pages 0..N-1. We cache each page's resulting cursor as we go, so
+ * the normal "scroll for more" pattern costs exactly one upstream call per
+ * new page, and revisiting a page costs none. A deep, never-before-seen
+ * skip is capped at MAX_PAGE_WALK sequential calls so a single request
+ * can't burn the user's whole rate limit; past that we return an empty,
+ * explicitly truncated page.
+ */
+async function fetchNews({ apiKey, category, query, language, skip = 0 }) {
+  if (!apiKey) {
+    const err = new Error("Missing newsdata.io API key");
+    err.status = 401;
+    throw err;
+  }
+
+  const pageIndex = Math.max(0, Math.floor(skip / PAGE_SIZE));
+  const queryKey = JSON.stringify({
+    category: category || null,
+    query: query || null,
+    language: language || "en"
+  });
+
+  const cachedPage = catalogCache.get(`${queryKey}::${pageIndex}`);
+  if (cachedPage) return cachedPage;
+
+  // Resume from the furthest already-known cursor rather than page 0.
+  let cursor;
+  let startIndex = 0;
+  for (let i = pageIndex - 1; i >= 0; i--) {
+    const token = pageCursorCache.get(`${queryKey}::${i}`);
+    if (token !== undefined) {
+      cursor = token;
+      startIndex = i + 1;
+      break;
+    }
+  }
+
+  if (pageIndex - startIndex >= MAX_PAGE_WALK) {
+    return { articles: [], hasMore: false, truncated: true };
+  }
+
+  let carriedToken = cursor;
+  for (let i = startIndex; i <= pageIndex; i++) {
+    if (i > startIndex && !carriedToken) {
+      // Upstream ran out of pages before we reached the requested one.
+      return { articles: [], hasMore: false, truncated: false };
+    }
+
+    const data = await callNewsdata({
+      apikey: apiKey,
+      language: language || "en",
+      category: category || undefined,
+      q: query || undefined,
+      page: carriedToken || undefined
+    });
+
+    const articles = rememberArticles((Array.isArray(data.results) ? data.results : []).map(normalizeArticle));
+    const nextPageToken = data.nextPage || null;
+
+    pageCursorCache.set(`${queryKey}::${i}`, nextPageToken);
+    catalogCache.set(`${queryKey}::${i}`, {
+      articles,
+      hasMore: Boolean(nextPageToken),
+      truncated: false
+    });
+
+    carriedToken = nextPageToken;
+  }
+
+  return catalogCache.get(`${queryKey}::${pageIndex}`) || { articles: [], hasMore: false, truncated: false };
+}
+
+/**
+ * Resolve one article by our stable id -- first from the article cache
+ * (populated by any earlier catalog/search fetch), then, if that has
+ * expired or the item was never seen in this process, by asking
+ * newsdata.io directly for that article id.
+ *
+ * That fallback is what makes /meta and /stream reliable for an item
+ * Stremio opens from its library hours later, or after a redeploy.
+ */
+async function getArticleById(apiKey, id) {
+  const cached = articleCache.get(id);
+  if (cached) return cached;
+
+  if (!apiKey || typeof id !== "string" || !id.startsWith("nd_")) return null;
+  const upstreamId = id.slice(3);
+
+  try {
+    const data = await callNewsdata({ apikey: apiKey, id: upstreamId });
+    const results = Array.isArray(data.results) ? data.results : [];
+    if (!results.length) return null;
+    const [article] = rememberArticles(results.map(normalizeArticle));
+    return article;
+  } catch (err) {
+    console.error("[newsdata] getArticleById failed:", err.message);
+    return null;
+  }
+}
+
+module.exports = { fetchNews, getArticleById, normalizeArticle, makeArticleId, PAGE_SIZE, MAX_PAGE_WALK };
