@@ -108,11 +108,18 @@ async function fetchNews({ apiKey, category, query, language, skip = 0 }) {
   let startIndex = 0;
   for (let i = pageIndex - 1; i >= 0; i--) {
     const token = pageCursorCache.get(`${queryKey}::${i}`);
-    if (token !== undefined) {
-      cursor = token;
-      startIndex = i + 1;
-      break;
-    }
+    if (token === undefined) continue; // that page hasn't been fetched yet
+
+    // A cached *null* means that page was the last one upstream had, so
+    // every page after it is empty. Returning here matters: without it the
+    // null would be carried forward as "no cursor", and the request would
+    // fetch page 0 again and serve it as this page -- duplicate headlines
+    // whenever the user scrolls past the end of a single-page topic.
+    if (token === null) return { articles: [], hasMore: false, truncated: false };
+
+    cursor = token;
+    startIndex = i + 1;
+    break;
   }
 
   if (pageIndex - startIndex >= MAX_PAGE_WALK) {
