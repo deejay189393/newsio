@@ -109,7 +109,20 @@ function isLowQuality(article) {
  * on a boundary. `loadPage(index)` returns { articles, hasMore } for one
  * upstream page; the caller decides how that page is fetched.
  */
-async function assembleCatalogPage({ skip, upstreamPageSize, loadPage }) {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function assembleCatalogPage({
+  skip,
+  upstreamPageSize,
+  loadPage,
+  // Some APIs reject two requests issued back to back. GNews does: a page
+  // built from two of its 10-article responses is blocked on the second
+  // every time unless they are spaced out, which would make it unable to
+  // serve a full page at all. `delay` is a seam for tests; nothing else
+  // passes it.
+  interPageDelayMs = 0,
+  delay = sleep
+}) {
   const offset = Math.max(0, Math.floor(Number(skip) || 0));
   const firstPage = Math.floor(offset / upstreamPageSize);
   const offsetWithinFirstPage = offset % upstreamPageSize;
@@ -120,6 +133,7 @@ async function assembleCatalogPage({ skip, upstreamPageSize, loadPage }) {
   let hasMore = false;
 
   for (let i = firstPage; i < firstPage + pagesNeeded; i++) {
+    if (i > firstPage && interPageDelayMs) await delay(interPageDelayMs);
     const page = await loadPage(i);
     if (!page) return { articles: [], hasMore: false, truncated: true };
 
