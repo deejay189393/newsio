@@ -401,11 +401,11 @@ describe("buildGenres — the detail page tag row", () => {
     });
 
     test("a hyphenated keyword with an empty segment is handled", () => {
-      expect(buildGenres({ categories: [], keywords: ["-lead-", "markets"] })).toEqual(["-lead-", "Markets"]);
+      expect(buildGenres({ categories: [], keywords: ["-lead-", "markets"] })).toEqual(["-Lead-", "Markets"]);
     });
 
     test("a lone hyphenated keyword is a real tag and survives", () => {
-      expect(g({ categories: [], keywords: ["sci-fi", "apple tv"] })).toEqual(["Sci-fi", "Apple TV"]);
+      expect(g({ categories: [], keywords: ["sci-fi", "apple tv"] })).toEqual(["Sci-Fi", "Apple TV"]);
     });
   });
 
@@ -427,8 +427,45 @@ describe("buildGenres — the detail page tag row", () => {
       expect(g({ categories: [], keywords: [raw] })).toEqual([shown]);
     });
 
-    test("deliberate casing is preserved", () => {
-      expect(g({ categories: [], keywords: ["iPhone"] })).toEqual(["iPhone"]);
+    // newsdata.io returns keywords entirely lower case, so the input is
+    // normalised rather than trusted: an upstream change in casing must not
+    // leak a SHOUTING or half-cased tag into the row.
+    test.each([
+      ["artificial intelligence", "Artificial Intelligence"],
+      ["ARTIFICIAL INTELLIGENCE", "Artificial Intelligence"],
+      ["Artificial Intelligence", "Artificial Intelligence"],
+      ["aRtIfIcIaL iNtElLiGeNcE", "Artificial Intelligence"],
+      ["iPhone", "Iphone"],
+      ["GEN Z", "Gen Z"]
+    ])("%p renders as %p whatever casing it arrives in", (raw, shown) => {
+      expect(g({ categories: [], keywords: [raw] })).toEqual([shown]);
+    });
+
+    test.each([
+      ["sci-fi", "Sci-Fi"],
+      ["e-bus", "E-Bus"],
+      ["multi-asset trading", "Multi-Asset Trading"],
+      ["co-op action survival", "Co-Op Action Survival"]
+    ])("a hyphenated compound %p capitalises both sides: %p", (raw, shown) => {
+      expect(g({ categories: [], keywords: [raw] })).toEqual([shown]);
+    });
+
+    test("every word of every tag starts with a capital", () => {
+      const tags = g({
+        categories: ["top", "technology"],
+        keywords: ["jensen huang", "gen z", "sci-fi", "child custody", "2026 elections"]
+      });
+      tags.forEach((tag) => {
+        tag.split(/[\s-]+/).forEach((word) => {
+          if (!/^[a-zA-Z]/.test(word)) return; // numbers and symbols have no case
+          expect(word[0]).toBe(word[0].toUpperCase());
+        });
+      });
+    });
+
+    test("category labels keep their own punctuation and casing", () => {
+      expect(g({ categories: ["business"], keywords: [] })).toEqual(["Finance & Business"]);
+      expect(g({ categories: ["tourism"], keywords: [] })).toEqual(["Tourism & Travel"]);
     });
 
     test("de-duplicates case-insensitively across categories and keywords", () => {
