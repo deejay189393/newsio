@@ -52,6 +52,18 @@ describe("renderConfigurePage — first-time configuration", () => {
     expect(html).toContain("https://newsdata.io/register");
   });
 
+  test("shows the addon tagline, matching the manifest description", () => {
+    const { DESCRIPTION } = require("../src/manifest");
+    expect(html).toContain("News on Stremio? Why not! Uses the newsdata.io API.");
+    expect(html).toContain(DESCRIPTION);
+    expect(html).not.toContain("Live news in Stremio, powered by newsdata.io.");
+  });
+
+  test("uses the newspaper logo for both the header art and the favicon", () => {
+    expect(html).toContain('<img src="/logo.png"');
+    expect(html).toContain('<link rel="icon" href="/logo.png"');
+  });
+
   test("builds the install URL with the SDK's config convention", () => {
     expect(html).toContain("encodeURIComponent(JSON.stringify(");
     expect(html).toContain("/manifest.json");

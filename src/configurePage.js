@@ -128,7 +128,7 @@ function renderConfigurePage({ baseUrl, existing }) {
   <header>
     <img src="/logo.png" alt="Newsio" />
     <h1>Newsio</h1>
-    <p>Live news in Stremio, powered by newsdata.io.</p>
+    <p>News on Stremio? Why not! Uses the newsdata.io API.</p>
   </header>
 
   ${isReconfigure ? '<div class="banner">Editing your current setup — your existing key and topics are pre-filled. Generate a new link and install it to apply changes.</div>' : ""}

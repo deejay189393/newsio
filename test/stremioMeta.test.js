@@ -1,4 +1,12 @@
-const { toMetaPreview, toFullMeta, toStreams, formatReleaseInfo, buildDescription } = require("../src/stremioMeta");
+const {
+  toMetaPreview,
+  toFullMeta,
+  toStreams,
+  formatReleaseInfo,
+  buildDescription,
+  buildName,
+  VIDEO_MARKER
+} = require("../src/stremioMeta");
 const { FALLBACK_POSTER, FALLBACK_BACKGROUND } = require("../src/fallbackImages");
 
 const videoArticle = {
@@ -41,15 +49,53 @@ describe("formatReleaseInfo", () => {
 });
 
 describe("buildDescription", () => {
-  test("prefixes [VIDEO] only when a video exists", () => {
-    expect(buildDescription(videoArticle)).toBe("[VIDEO] Speedups incoming.");
+  test("is the article summary, with no video tag mixed in", () => {
+    expect(buildDescription(videoArticle)).toBe("Speedups incoming.");
     expect(buildDescription(textArticle)).toBe("Stocks jumped.");
   });
-  test("still tags a video story that has no description text", () => {
-    expect(buildDescription({ description: "", videoUrl: "https://v/x.mp4" })).toBe("[VIDEO]");
-  });
-  test("returns undefined for an empty text-only description", () => {
+  test("returns undefined for an empty description", () => {
+    expect(buildDescription({ description: "", videoUrl: "https://v/x.mp4" })).toBeUndefined();
     expect(buildDescription({ description: "", videoUrl: null })).toBeUndefined();
+  });
+});
+
+describe("buildName — telling video stories from text stories", () => {
+  test("marks a story that has a playable video", () => {
+    expect(buildName(videoArticle)).toBe("\u25b6 AI chips get faster");
+  });
+
+  test("leaves a text-only story's headline untouched", () => {
+    expect(buildName(textArticle)).toBe("Markets rally");
+    expect(buildName(textArticle)).not.toContain(VIDEO_MARKER);
+  });
+
+  test("the marker is a single glyph, so it barely eats into a truncated title", () => {
+    expect(VIDEO_MARKER).toBe("\u25b6");
+    expect(VIDEO_MARKER).toHaveLength(1);
+    expect(buildName(videoArticle).length).toBe(videoArticle.title.length + 2);
+  });
+
+  test("the marker leads the name, where a grid actually shows it", () => {
+    expect(buildName(videoArticle).startsWith(VIDEO_MARKER + " ")).toBe(true);
+  });
+
+  // Regression: the marker used to live on the description, which a catalog
+  // grid never renders -- so it was invisible exactly where it mattered.
+  test("the description carries no marker, in preview or full meta", () => {
+    expect(toMetaPreview(videoArticle).description).not.toContain(VIDEO_MARKER);
+    expect(toMetaPreview(videoArticle).description).not.toContain("[VIDEO]");
+    expect(toFullMeta(videoArticle).description).not.toContain("[VIDEO]");
+  });
+
+  test("preview and full meta agree on the name", () => {
+    expect(toMetaPreview(videoArticle).name).toBe(toFullMeta(videoArticle).name);
+    expect(toMetaPreview(textArticle).name).toBe(toFullMeta(textArticle).name);
+  });
+
+  test("a video story with no description is still marked", () => {
+    const bare = { id: "nd_3", title: "Clip", description: "", videoUrl: "https://v/x.mp4", link: "https://l" };
+    expect(toMetaPreview(bare).name).toBe("\u25b6 Clip");
+    expect(toMetaPreview(bare).description).toBeUndefined();
   });
 });
 
@@ -58,12 +104,12 @@ describe("toMetaPreview", () => {
     expect(toMetaPreview(videoArticle)).toEqual({
       id: "nd_1",
       type: "news",
-      name: "AI chips get faster",
+      name: "\u25b6 AI chips get faster",
       poster: "https://example.com/a1.jpg",
       posterShape: "landscape",
       background: "https://example.com/a1.jpg",
       logo: "https://example.com/icon.png",
-      description: "[VIDEO] Speedups incoming.",
+      description: "Speedups incoming.",
       releaseInfo: "2026-09-18"
     });
   });

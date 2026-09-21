@@ -60,18 +60,42 @@ describe("manifest routes", () => {
     const res = await request(app).get("/manifest.json");
     expect(res.status).toBe(200);
     expect(res.body.id).toBe("org.deejay189393.newsio");
-    expect(res.body.version).toBe("0.1.0");
+    expect(res.body.version).toBe("0.2.0");
     expect(res.body.catalogs).toEqual([]);
     expect(res.body.behaviorHints.configurationRequired).toBe(true);
     expect(res.body.types).toEqual(["news"]);
   });
 
-  test("a configured manifest lists the chosen topics as catalog names", async () => {
+  test("a configured manifest lists the chosen topics, then the search catalog", async () => {
     const res = await request(app).get(`/${CFG()}/manifest.json`);
     expect(res.status).toBe(200);
-    expect(res.body.catalogs.map((c) => c.name)).toEqual(["Technology", "Finance & Business"]);
+    expect(res.body.catalogs.map((c) => c.name)).toEqual(["Technology", "Finance & Business", "Newsio"]);
     expect(res.body.behaviorHints.configurationRequired).toBe(false);
     expect(res.body.behaviorHints.configurable).toBe(true);
+  });
+
+  test("the served manifest carries the new short description", async () => {
+    const res = await request(app).get(`/${CFG()}/manifest.json`);
+    expect(res.body.description).toBe("News on Stremio? Why not! Uses the newsdata.io API.");
+  });
+
+  // Regression: search used to be declared on every topic catalog, so one
+  // query produced an identical result row per selected topic.
+  test("only the search catalog advertises search, whatever the user picked", async () => {
+    const many = encodeConfig({
+      apiKey: "K",
+      topics: ["top", "technology", "science", "health", "sports"],
+      language: "en"
+    });
+    const res = await request(app).get(`/${many}/manifest.json`);
+    const searchable = res.body.catalogs.filter((c) => c.extra.some((e) => e.name === "search"));
+    expect(searchable).toHaveLength(1);
+    expect(searchable[0]).toEqual({
+      type: "news",
+      id: "search",
+      name: "Newsio",
+      extra: [{ name: "search", isRequired: true }, { name: "skip" }]
+    });
   });
 
   test("advertises https asset URLs when behind a TLS-terminating proxy", async () => {
@@ -110,7 +134,7 @@ describe("configure / re-configure routes", () => {
     const segment = encodeURIComponent(JSON.stringify({ apiKey: "K", topics: ["sports"], language: "de" }));
     const res = await request(app).get(`/${segment}/manifest.json`);
     expect(res.status).toBe(200);
-    expect(res.body.catalogs.map((c) => c.name)).toEqual(["Sports"]);
+    expect(res.body.catalogs.map((c) => c.name)).toEqual(["Sports", "Newsio"]);
   });
 });
 
@@ -123,12 +147,31 @@ describe("catalog route", () => {
     expect(res.body.metas[0]).toMatchObject({ id: "nd_a1", type: "news", name: "Title a1" });
   });
 
-  test("supports search from Stremio's search bar", async () => {
+  test("supports search from Stremio's search bar, via the search catalog", async () => {
     global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("s1")], nextPage: null }));
-    const res = await request(app).get(`/${CFG()}/catalog/news/technology/search=ai%20chips.json`);
+    const res = await request(app).get(`/${CFG()}/catalog/news/search/search=ai%20chips.json`);
     expect(res.status).toBe(200);
     expect(res.body.metas[0].id).toBe("nd_s1");
-    expect(new URL(global.fetch.mock.calls[0][0]).searchParams.get("q")).toBe("ai chips");
+    const url = new URL(global.fetch.mock.calls[0][0]);
+    expect(url.searchParams.get("q")).toBe("ai chips");
+    expect(url.searchParams.has("category")).toBe(false);
+  });
+
+  test("the search catalog route returns nothing without a query", async () => {
+    global.fetch = jest.fn();
+    const res = await request(app).get(`/${CFG()}/catalog/news/search.json`);
+    expect(res.status).toBe(200);
+    expect(res.body.metas).toEqual([]);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test("a topic catalog browses its category and ignores a hand-added query", async () => {
+    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("a1")], nextPage: null }));
+    const res = await request(app).get(`/${CFG()}/catalog/news/technology/search=ignored.json`);
+    expect(res.status).toBe(200);
+    const url = new URL(global.fetch.mock.calls[0][0]);
+    expect(url.searchParams.has("q")).toBe(false);
+    expect(url.searchParams.get("category")).toBe("technology");
   });
 
   test("supports skip-based pagination", async () => {
@@ -203,12 +246,22 @@ describe("meta route", () => {
     expect(res.body.meta.name).toBe("Cold start");
   });
 
-  test("tags a video article's description with [VIDEO]", async () => {
+  test("marks a video article in its name, leaving the description clean", async () => {
     global.fetch = jest.fn().mockResolvedValue(
       ok({ results: [article("v1", { description: "Watch this.", video_url: "https://e.com/v.mp4" })] })
     );
     const res = await request(app).get(`/${CFG()}/meta/news/nd_v1.json`);
-    expect(res.body.meta.description).toBe("[VIDEO] Watch this.");
+    expect(res.body.meta.name).toBe("\u25b6 Title v1");
+    expect(res.body.meta.description).toBe("Watch this.");
+  });
+
+  test("leaves a text-only article's name unmarked", async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValue(ok({ results: [article("t1", { description: "Read this.", video_url: null })] }));
+    const res = await request(app).get(`/${CFG()}/meta/news/nd_t1.json`);
+    expect(res.body.meta.name).toBe("Title t1");
+    expect(res.body.meta.description).toBe("Read this.");
   });
 
   test("returns a 500-class error for an article that cannot be resolved", async () => {
@@ -282,6 +335,7 @@ describe("end-to-end user journey", () => {
     const cfg = encodeConfig({ apiKey: "K", topics: ["technology"], language: "en" });
     const manifest = await request(app).get(`/${cfg}/manifest.json`);
     expect(manifest.body.catalogs[0].name).toBe("Technology");
+    expect(manifest.body.catalogs.at(-1).name).toBe("Newsio");
 
     // 3. Stremio loads the catalog for that topic
     const catalog = await request(app).get(`/${cfg}/catalog/news/technology.json`);
@@ -290,7 +344,11 @@ describe("end-to-end user journey", () => {
 
     // 4. user opens the item -> metadata resolves by that id
     const meta = await request(app).get(`/${cfg}/meta/news/${item.id}.json`);
-    expect(meta.body.meta.name).toBe("Title j1");
+    expect(meta.body.meta.name).toBe("\u25b6 Title j1");
+
+    // 4b. and the same story is findable through the search catalog
+    const found = await request(app).get(`/${cfg}/catalog/news/search/search=title.json`);
+    expect(found.body.metas[0].id).toBe("nd_j1");
 
     // 5. user hits play -> a video stream exists for that id
     const stream = await request(app).get(`/${cfg}/stream/news/${item.id}.json`);

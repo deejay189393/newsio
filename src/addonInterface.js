@@ -1,5 +1,5 @@
 const { addonBuilder, getRouter } = require("stremio-addon-sdk");
-const { buildInterfaceManifest } = require("./manifest");
+const { buildInterfaceManifest, SEARCH_CATALOG_ID } = require("./manifest");
 const { getTopicById, VALID_LANGUAGE_CODES } = require("./topics");
 const { fetchNews, getArticleById } = require("./newsdata");
 const { toMetaPreview, toFullMeta, toStreams } = require("./stremioMeta");
@@ -29,18 +29,29 @@ function createAddonInterface() {
   // an error on upstream failure, so a rate-limited key degrades to an
   // empty shelf instead of a broken addon.
   builder.defineCatalogHandler(async ({ id, extra, config }) => {
-    const topic = getTopicById(id);
-    if (!topic || !config || !config.apiKey) return { metas: [] };
+    if (!config || !config.apiKey) return { metas: [] };
 
-    const searchQuery = (extra && extra.search) || undefined;
+    // Two shapes of catalog reach this handler. The dedicated search
+    // catalog runs a free-text query across all of newsdata.io with no
+    // category filter. A topic catalog browses only its own category and
+    // no longer advertises `search` at all, so a query aimed at one is
+    // ignored rather than silently widened to every category.
+    const isSearch = id === SEARCH_CATALOG_ID;
+    const topic = isSearch ? null : getTopicById(id);
+    if (!isSearch && !topic) return { metas: [] };
+
+    const searchQuery = isSearch ? (extra && extra.search) || undefined : undefined;
+    // The manifest marks this extra isRequired, but a hand-built URL can
+    // still reach the search catalog with no query, and there is nothing
+    // to list for one.
+    if (isSearch && !searchQuery) return { metas: [] };
+
     const skip = parseInt((extra && extra.skip) || "0", 10) || 0;
 
     try {
       const { articles } = await fetchNews({
         apiKey: config.apiKey,
-        // A search is a free-text query across all news, so the topic's
-        // category filter is dropped while searching.
-        category: searchQuery ? undefined : topic.category,
+        category: isSearch ? undefined : topic.category,
         query: searchQuery,
         language: safeLanguage(config.language),
         skip
