@@ -30,16 +30,31 @@ describe("brand assets on disk", () => {
     });
   });
 
-  test("logo.png is a square PNG, large enough for every client surface", () => {
-    const { width, height } = pngSize(read("logo.png"));
-    expect(width).toBe(height);
-    expect(width).toBeGreaterThanOrEqual(256);
+  // The addon protocol is specific about these, and a client that enforces
+  // it refuses the image and falls back to a generated letter avatar -- an
+  // "N on purple" where the logo should be. The sizes are asserted exactly
+  // rather than as minimums for that reason.
+  test("logo.png is exactly 256x256, as the manifest spec requires", () => {
+    expect(pngSize(read("logo.png"))).toEqual({ width: 256, height: 256 });
   });
 
-  test("background.png is a real PNG in a 16:9 backdrop shape", () => {
+  test("background.png meets the spec's minimum of 1024x786", () => {
     const { width, height } = pngSize(read("background.png"));
-    expect(width).toBeGreaterThanOrEqual(1280);
+    expect(width).toBeGreaterThanOrEqual(1024);
+    expect(height).toBeGreaterThanOrEqual(786);
+  });
+
+  test("background.png keeps a 16:9 backdrop shape", () => {
+    const { width, height } = pngSize(read("background.png"));
     expect(width / height).toBeCloseTo(16 / 9, 2);
+  });
+
+  test("both are non-interlaced 8-bit PNGs, which every decoder accepts", () => {
+    ["logo.png", "background.png"].forEach((f) => {
+      const buf = read(f);
+      expect(buf.readUInt8(24)).toBe(8); // bit depth
+      expect(buf.readUInt8(28)).toBe(0); // interlace method: none
+    });
   });
 
   test("the SVGs are well-formed and sized by a viewBox, so they scale", () => {
@@ -104,7 +119,32 @@ describe("assets are actually served", () => {
     const manifest = (await request(app).get("/manifest.json")).body;
     for (const url of [manifest.logo, manifest.background]) {
       expect(url).toMatch(/^https?:\/\//);
-      expect((await request(app).get(new URL(url).pathname)).status).toBe(200);
+      const { pathname, search } = new URL(url);
+      expect((await request(app).get(pathname + search)).status).toBe(200);
     }
+  });
+
+  // Stremio clients cache addon artwork by URL, so replacing the bytes at a
+  // fixed path leaves a stale image on screen indefinitely.
+  test("asset URLs carry the addon version, so a new build busts the cache", async () => {
+    const { ADDON_VERSION } = require("../src/manifest");
+    const manifest = (await request(app).get("/manifest.json")).body;
+    [manifest.logo, manifest.background].forEach((url) => {
+      expect(new URL(url).searchParams.get("v")).toBe(ADDON_VERSION);
+    });
+  });
+
+  test("a versioned asset URL still serves the file", async () => {
+    const res = await request(app).get("/logo.png?v=0.6.1");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("image/png");
+  });
+
+  test("the logo the manifest advertises is the same file the configure page shows", async () => {
+    const manifest = (await request(app).get("/manifest.json")).body;
+    const fromManifest = await request(app).get(new URL(manifest.logo).pathname);
+    const page = await request(app).get("/configure");
+    expect(page.text).toContain('<img src="/logo.png"');
+    expect(Buffer.from(fromManifest.body)).toEqual(read("logo.png"));
   });
 });
