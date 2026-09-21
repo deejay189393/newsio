@@ -28,8 +28,10 @@ const PRESET_TOPICS = [
   { id: "tourism", label: "Tourism & Travel" },
   { id: "crime", label: "Crime" },
   { id: "domestic", label: "Domestic" },
-  // Not a subject but a filter: stories that carry a playable video. Only
-  // newsdata.io can serve it, so the others are skipped for this catalog.
+  // Not a subject but a filter: stories that carry a playable video.
+  // newsdata.io filters its feed for one; YouTube is nothing but video, so
+  // for it this catalog is simply general news. Currents and GNews have no
+  // video at all and are skipped here.
   { id: "video", label: "Video News" }
 ];
 

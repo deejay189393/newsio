@@ -3,17 +3,34 @@ const { getTopicLabel } = require("./topics");
 const { FALLBACK_POSTER, FALLBACK_BACKGROUND } = require("./fallbackImages");
 
 /**
- * newsdata.io returns dates as "YYYY-MM-DD HH:MM:SS" in UTC. Stremio shows
- * `releaseInfo` verbatim, so we normalize to a plain date and drop it
- * entirely if the upstream value is missing or unparseable (better no date
- * than "Invalid Date" in the UI).
+ * Stremio shows `releaseInfo` verbatim, so we normalize to a plain date and
+ * drop it entirely if the upstream value is missing or unparseable (better
+ * no date than "Invalid Date" in the UI).
+ *
+ * All four sources disagree on format and every shape has to work:
+ *
+ *   newsdata.io  2026-09-21 17:55:42          (zone implied, UTC)
+ *   Currents     2026-09-21 19:14:32 +0000    (space before the offset)
+ *   GNews        2026-09-21T17:55:42Z
+ *   YouTube      2026-09-21T17:55:42Z
+ *
+ * This used to append "Z" unconditionally after swapping the first space for
+ * a "T", which produced "...:42ZZ" for the ISO pair and "...:42 +0000Z" for
+ * Currents. Both are unparseable, so three of the four sources quietly had
+ * no date at all in the UI and only newsdata.io ever showed one. Caught by
+ * looking at live output; no test covered a non-newsdata date shape.
  */
+const ZONE_SUFFIX = /(Z|[+-]\d{2}:?\d{2})$/i;
+
 function formatReleaseInfo(pubDate) {
   if (!pubDate) return undefined;
-  const d = new Date(String(pubDate).replace(" ", "T") + "Z");
+  // Date/time separator, then close up any gap before a trailing zone.
+  const iso = String(pubDate).trim().replace(" ", "T").replace(/\s+(?=[+-]\d{2}:?\d{2}$)/, "");
+  const d = new Date(ZONE_SUFFIX.test(iso) ? iso : `${iso}Z`);
   if (isNaN(d.getTime())) return undefined;
   return d.toISOString().slice(0, 10);
 }
+
 
 /**
  * Marker shown on stories that carry a playable video.
@@ -127,7 +144,11 @@ const ACRONYMS = new Set([
   "ipo", "suv", "ev", "nasa", "nfl", "nba", "mlb", "nhl", "ipl", "fifa", "uefa",
   "gps", "api", "tv", "pc", "isp", "nsfw", "pdf", "cpu", "gpu", "usb", "sms",
   "url", "vpn", "ssd", "led", "hd", "ui", "ux", "faq", "diy", "hbo", "bbc",
-  "cnn", "espn", "nato", "fbi", "cia", "nhs", "imf", "who", "un"
+  "cnn", "espn", "nato", "fbi", "cia", "nhs", "imf", "who", "un",
+  // Broadcaster initialisms, which YouTube channel tags are full of --
+  // "Fnc", "Gma" and "Usa" all reached a live tag row before these.
+  "usa", "abc", "nbc", "cbs", "npr", "afp", "gma", "fnc", "cnbc", "msnbc",
+  "wsj", "itv", "rte", "sabc", "ndtv", "opec", "g7", "g20"
 ]);
 
 /**
@@ -225,6 +246,46 @@ function titleCaseTag(tag) {
 }
 
 /**
+ * Suppress SEO tag families.
+ *
+ * Publishers stuff a keyword list with rewordings of one phrase to catch
+ * every search for it. YouTube is by far the worst: one story arrived with
+ * fifteen tags that were all "iit bombay student death" with a different
+ * word swapped in, and another with five spellings of "kaynes technology
+ * share latest news". Rendered verbatim that is a tag row saying one thing
+ * six times.
+ *
+ * Two tags are the same family when most of the shorter one's words appear
+ * in the other. The comparison runs against every tag already considered,
+ * including ones themselves dropped, so a chain of rewordings collapses to
+ * the first of them rather than to every other link in turn. Single-word
+ * tags are exempt: "Radio" and "Visual Radio" fully overlap on the only
+ * word there is, and they are not the same subject.
+ */
+const TAG_OVERLAP_THRESHOLD = 0.6;
+
+function tagWords(tag) {
+  return new Set(
+    tag
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((word) => word.length > 1)
+  );
+}
+
+function isSameFamily(words, previous) {
+  if (words.size < 2) return false;
+  return previous.some((prior) => {
+    if (prior.size < 2) return false;
+    let shared = 0;
+    words.forEach((word) => {
+      if (prior.has(word)) shared += 1;
+    });
+    return shared / Math.min(words.size, prior.size) >= TAG_OVERLAP_THRESHOLD;
+  });
+}
+
+/**
  * The tag row on the detail page.
  *
  * Categories come first -- they are newsdata.io's own reliable taxonomy, so
@@ -257,20 +318,29 @@ function buildGenres(article) {
       if (!k || k.length > MAX_TAG_LENGTH) return false;
       if (GENERIC_KEYWORDS.has(lower)) return false;
       if (k.includes("_")) return false; // author handles and slugs
+      if (k.startsWith("#")) return false; // channel branding, not a subject
       if (lower.includes("home page") || lower.endsWith("feed")) return false; // site navigation
       if (isCmsField(k)) return false; // the outlet's own record, not a subject
+      // Either direction: "Reuters" as a tag on a Reuters story, and
+      // "Reuters Youtube", which is the channel advertising itself.
+      // Guarded on length so a short id cannot match half the vocabulary.
       if (publisher.some((p) => p && (p === fold(k) || p.includes(fold(k))))) return false;
+      if (publisher.some((p) => p && p.length >= 4 && fold(k).includes(p))) return false;
       if (lower.split("-").some((segment) => slugSegments.has(segment))) return false;
       return true;
     })
     .map(titleCaseTag);
 
   const seen = new Set();
+  const families = [];
   const tags = [];
   for (const tag of [...categories, ...keywords]) {
     const key = tag.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
+    const words = tagWords(tag);
+    if (isSameFamily(words, families)) continue;
+    families.push(words);
     tags.push(tag);
     if (tags.length === MAX_TAGS) break;
   }
@@ -290,6 +360,9 @@ function toFullMeta(article) {
     logo: article.sourceIcon || undefined,
     description: buildFullDescription(article),
     releaseInfo: formatReleaseInfo(article.pubDate),
+    // Only a video source knows how long the item runs; a wire story has no
+    // such thing, so the field is left off rather than faked.
+    runtime: article.duration || undefined,
     genres: buildGenres(article),
     website: article.link,
     links: [
@@ -364,7 +437,16 @@ function toStreams(article) {
   const video = toVideoStream(article);
   if (video) streams.push(video);
 
-  const readTitle = video ? `Read full story on ${article.sourceName}` : `Read on ${article.sourceName}`;
+  // Offered alongside the playable stream, never instead of it. Clients
+  // differ in what they can play -- `ytId` needs a built-in YouTube player
+  // and not every Stremio-compatible app has one -- so both are listed and
+  // the client shows whichever it understands.
+  const readTitle =
+    article.provider === "youtube"
+      ? `Watch on YouTube (${article.sourceName})`
+      : video
+        ? `Read full story on ${article.sourceName}`
+        : `Read on ${article.sourceName}`;
   streams.push({
     name: "Newsio",
     title: readTitle,
@@ -385,6 +467,8 @@ module.exports = {
   buildDescription,
   buildFullDescription,
   buildGenres,
+  tagWords,
+  isSameFamily,
   isCmsField,
   buildName,
   VIDEO_MARKER

@@ -20,9 +20,10 @@ const CONTENT_TYPE = "news";
 const ID_PREFIXES = PROVIDERS.map((p) => p.idPrefix);
 
 const ADDON_ID = "org.deejay189393.newsio";
-const ADDON_VERSION = "0.6.4";
+const ADDON_VERSION = "0.7.0";
 const CONTACT_EMAIL = "deejay189393@users.noreply.github.com";
-const DESCRIPTION = "News on Stremio? Why not! Reads live headlines from newsdata.io, Currents and GNews.";
+const DESCRIPTION =
+  "News on Stremio? Why not! Reads live headlines from newsdata.io, Currents, YouTube and GNews.";
 
 /**
  * Search is served by ONE catalog for the whole addon, not by every topic.
@@ -223,7 +224,7 @@ function buildInterfaceManifest() {
     types: [CONTENT_TYPE],
     idPrefixes: ID_PREFIXES,
     catalogs: [...TOPICS.map(topicCatalog), searchCatalog()],
-    config: [{ key: "apiKey", type: "password", title: "newsdata.io API Key" }],
+    config: [{ key: "apiKey", type: "password", title: "API Key" }],
     behaviorHints: { configurable: true, configurationRequired: true }
   };
 }

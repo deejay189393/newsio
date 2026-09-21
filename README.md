@@ -18,6 +18,7 @@ the next, so your catalogs stay full instead of going empty.
 |---|---|---|---|---|
 | [Currents](https://currentsapi.services) | **minutes** | 20 (a whole page, 1 credit) | no | 15 of 17 |
 | [newsdata.io](https://newsdata.io) | minutes | 10 (a page costs 2 credits) | **yes** | 17 of 17 |
+| [YouTube](https://developers.google.com/youtube/v3) | **minutes** | 50 (a page costs 1 of only 100 searches a day) | **every story** | 17 of 17 |
 | [GNews](https://gnews.io) | **12 hours behind** on the free plan | 10 (a page costs 2 credits, spaced 1.5s apart) | no | 10 of 17 |
 
 Measured, not quoted from the docs: sampled against all three at the same
@@ -30,8 +31,35 @@ That makes GNews a poor *primary* source for an addon whose whole pitch is live
 news — but a perfectly reasonable *last resort*, which is why it is offered and
 why the configure page labels it. Stale news beats an empty shelf.
 
-Only newsdata.io carries video, so the ▶ marker only ever appears on stories it
-served.
+newsdata.io and YouTube carry video; Currents and GNews have no video field at
+all, so the ▶ marker never appears on a story either of them served.
+
+YouTube is a different animal from the other three and worth understanding
+before you add it. It is not a news wire — it is a search engine over everything
+anyone has uploaded, so the raw results include auto-generated reels,
+impersonator channels and bulletins in languages you did not ask for. Newsio
+constrains it on the way out and filters it on the way back:
+
+- searches inside **News & Politics** (`videoCategoryId=25`) for preset topics,
+  and drops the category for your own topics and the search box — measured, the
+  category strangles a narrow query ("FIFA World Cup" returned five thin clips
+  in three languages), so the word "news" is appended instead
+- excludes anything **under four minutes**, which is where the Shorts and the
+  hashtag-spam clips live
+- asks only for **embeddable** videos, ordered **newest first**
+- then enriches every hit through `videos.list` — 50 ids for one quota unit —
+  and drops what the search could not judge: the wrong **spoken language**
+  (`relevanceLanguage` is only a ranking hint, so this is the real filter),
+  premieres that have **not aired**, and videos with **almost no views**
+
+That last one does the most work. In the samples taken while building this, an
+impersonator channel calling itself "CNN News USA" sat at 3 views beside
+Bloomberg's 241,766 on the same query.
+
+The hard limit is **100 searches per day** per key — the same ceiling as GNews,
+and Google states it plainly. A catalog page costs one, and pages already
+fetched come from cache, so ordinary scrolling is cheap; a cold jump deep into
+a catalog is capped at four.
 
 GNews also refuses two requests issued back to back — measured: the second of a
 pair sent with no gap is refused outright, while the same pair a second apart
@@ -57,9 +85,10 @@ every fresher source is already spent.
 - **You choose the catalog order.** Topics are an ordered list, and that order
   is the order the catalogs appear in Stremio. A custom topic can sit anywhere
   among the presets.
-- **A Video News catalog.** Only newsdata.io carries video, and only a small
-  share of its stories have one, so browsing a normal topic surfaces them
-  rarely. This catalog asks newsdata.io for video stories specifically.
+- **A Video News catalog.** Only a small share of newsdata.io's stories carry
+  video, so browsing a normal topic surfaces them rarely. This catalog asks
+  newsdata.io for video stories specifically. With YouTube configured the
+  question does not arise: every story it serves is a video.
 - **Failover across sources.** Configure two or three keys and order them.
   Newsio tries them top to bottom and moves on whenever one is rate-limited,
   rejected or down — and remembers the failure for ten minutes so the next
@@ -187,15 +216,25 @@ search proxy.
 
 ### Video News
 
-Only newsdata.io reports video at all, and only a small share of its stories
-carry one, so scrolling an ordinary topic turns up very few. The **Video News**
-preset asks newsdata.io for video stories specifically (`video=1`) rather than
-filtering a normal feed, so the catalog is video from end to end. The other two
-sources are skipped for it — they have no video field to filter on.
+Only a small share of newsdata.io's stories carry video, so scrolling an
+ordinary topic turns up very few. The **Video News** preset asks newsdata.io for
+video stories specifically (`video=1`) rather than filtering a normal feed, so
+the catalog is video from end to end. Currents and GNews are skipped for it —
+they have no video field to filter on.
+
+YouTube needs no such filter: every result is a video, so for it this catalog is
+simply general news.
 
 The ▶ marker still only appears where playback will really work: a story whose
 `video_url` is an embed page rather than a media file is left unmarked, because
 Stremio can only hand that to a browser.
+
+**A YouTube story offers two streams at once**, and that is deliberate rather
+than a fallback. The addon protocol's `ytId` "plays using the built-in YouTube
+player", which official Stremio has and not every Stremio-compatible client
+does. So the video is listed both as a `ytId` stream and as an `externalUrl` to
+the watch page, and the client shows whichever it understands. If inline
+playback works you get it; if it does not, the link is already there.
 
 ## Failover
 
@@ -225,8 +264,8 @@ Article ids carry a per-provider prefix — `cu_`, `nd_`, `gn_` — so a story
 opened from your library is always resolved against the API that issued it,
 whichever source happens to be serving catalogs at the time.
 
-**One caveat worth knowing:** only newsdata.io can look up a single article by
-id. Currents and GNews have no such endpoint, so a story from those sources is
+**One caveat worth knowing:** newsdata.io and YouTube can look up a single
+article by id. Currents and GNews have no such endpoint, so a story from those
 resolvable only while it is still in the in-memory cache (one hour). Open one
 from your Stremio library a day later and it will not resolve.
 

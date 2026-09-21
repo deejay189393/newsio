@@ -1,13 +1,14 @@
 const newsdata = require("./newsdata");
 const currents = require("./currents");
 const gnews = require("./gnews");
+const youtube = require("./youtube");
 
 /**
  * Every news API the addon can read from, in the order they are offered on
  * the configure page: freshest first, because that is the order most users
  * should run them in.
  */
-const PROVIDERS = [currents, newsdata, gnews];
+const PROVIDERS = [currents, newsdata, youtube, gnews];
 const PROVIDERS_BY_ID = new Map(PROVIDERS.map((p) => [p.id, p]));
 
 /**

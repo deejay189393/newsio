@@ -337,8 +337,11 @@ describe("configure page — the failover chain", () => {
 
   test("several keys become an ordered chain, in the order shown on the page", () => {
     const page = loadPage();
+    // Every provider keyed, so the encoded chain and the card order are
+    // directly comparable; the gap case has its own test above.
     page.setKey("currents", "c1");
     page.setKey("newsdata", "n1");
+    page.setKey("youtube", "y1");
     page.setKey("gnews", "g1");
     page.check("top");
     page.submit();
@@ -404,13 +407,14 @@ describe("configure page — the failover chain", () => {
   // user with a gap in the list would misread their own priority order.
   test("rank badges count only the sources that have a key", () => {
     const page = loadPage();
-    expect(page.ranks()).toEqual(["-", "-", "-"]);
+    // Card order is the default chain: currents, newsdata, youtube, gnews.
+    expect(page.ranks()).toEqual(["-", "-", "-", "-"]);
     page.setKey("newsdata", "n1");
-    expect(page.ranks()).toEqual(["-", "1", "-"]);
+    expect(page.ranks()).toEqual(["-", "1", "-", "-"]);
     page.setKey("gnews", "g1");
-    expect(page.ranks()).toEqual(["-", "1", "2"]);
+    expect(page.ranks()).toEqual(["-", "1", "-", "2"]);
     page.setKey("currents", "c1");
-    expect(page.ranks()).toEqual(["1", "2", "3"]);
+    expect(page.ranks()).toEqual(["1", "2", "-", "3"]);
   });
 
   test("a filled source is visibly marked as active", () => {

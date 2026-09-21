@@ -144,13 +144,13 @@ describe("isConfigured", () => {
 
 describe("unusedProviders", () => {
   test("lists what the user has not configured yet", () => {
-    expect(unusedProviders({ sources: [CUR] }).map((p) => p.id)).toEqual(["newsdata", "gnews"]);
-    expect(unusedProviders({ sources: [CUR, ND] }).map((p) => p.id)).toEqual(["gnews"]);
+    expect(unusedProviders({ sources: [CUR] }).map((p) => p.id)).toEqual(["newsdata", "youtube", "gnews"]);
+    expect(unusedProviders({ sources: [CUR, ND] }).map((p) => p.id)).toEqual(["youtube", "gnews"]);
   });
 
   test("lists everything when nothing is configured", () => {
-    expect(unusedProviders({}).map((p) => p.id)).toEqual(["currents", "newsdata", "gnews"]);
-    expect(unusedProviders(null).map((p) => p.id)).toEqual(["currents", "newsdata", "gnews"]);
+    expect(unusedProviders({}).map((p) => p.id)).toEqual(["currents", "newsdata", "youtube", "gnews"]);
+    expect(unusedProviders(null).map((p) => p.id)).toEqual(["currents", "newsdata", "youtube", "gnews"]);
   });
 });
 

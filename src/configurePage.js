@@ -199,7 +199,7 @@ function renderConfigurePage({ baseUrl, existing }) {
   <header>
     <img src="/logo.png" alt="Newsio" />
     <h1>Newsio</h1>
-    <p>News on Stremio? Why not! Reads live headlines from newsdata.io, Currents and GNews.</p>
+    <p>News on Stremio? Why not! Reads live headlines from newsdata.io, Currents, YouTube and GNews.</p>
   </header>
 
   ${isReconfigure ? '<div class="banner">Editing your current setup — your keys, their order and your topics are pre-filled. Generate a new link and install it to apply changes.</div>' : ""}
