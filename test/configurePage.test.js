@@ -261,14 +261,23 @@ describe("API keys can be revealed", () => {
     expect((markup.match(/class="key-toggle"/g) || []).length).toBe(providers);
   });
 
-  test("the control is a real icon, not an emoji", () => {
+  test("the control is a plain drawn icon, not an emoji", () => {
     // An emoji renders as a coloured sticker at whatever size the platform
     // font decides; an inline SVG inherits the button's colour and size.
     const markup = renderConfigurePage({ baseUrl: BASE, existing: null });
     expect(markup).not.toContain("&#128065;");
-    expect(markup).toContain('class="eye-open"');
-    expect(markup).toContain('class="eye-shut"');
     expect(markup).toContain('stroke="currentColor"');
+  });
+
+  test("it is one icon of three strokes, not a pair that swaps", () => {
+    // Kept deliberately plain: an outline, a pupil and a slash. The shape
+    // never morphs between states, so there is nothing to keep in sync.
+    const markup = renderConfigurePage({ baseUrl: BASE, existing: null });
+    const button = markup.slice(markup.indexOf('class="key-toggle"'));
+    const first = button.slice(0, button.indexOf("</button>"));
+    expect((first.match(/<svg/g) || []).length).toBe(1);
+    expect((first.match(/<path|<circle|<line/g) || []).length).toBe(3);
+    expect(first).toContain('class="eye-slash"');
   });
 
   test("the field still starts masked", () => {
