@@ -34,7 +34,7 @@ describe("basic routes", () => {
     expect(res.status).toBe(200);
     expect(res.headers["content-type"]).toMatch(/text\/html/);
     expect(res.text).toContain("Newsio");
-    expect(res.text).toContain("newsdata.io API key");
+    expect(res.text).toContain("newsdata.io key");
   });
 
   test("GET /health returns ok", async () => {
@@ -62,7 +62,7 @@ describe("manifest routes", () => {
     const res = await request(app).get("/manifest.json");
     expect(res.status).toBe(200);
     expect(res.body.id).toBe("org.deejay189393.newsio");
-    expect(res.body.version).toBe("0.6.1");
+    expect(res.body.version).toBe("0.6.2");
     expect(res.body.catalogs).toEqual([]);
     expect(res.body.behaviorHints.configurationRequired).toBe(true);
     expect(res.body.types).toEqual(["news"]);

@@ -7,8 +7,8 @@
  *   preset  a curated subject each provider maps to its own category
  *           vocabulary ("tourism" is "travel" to Currents)
  *   custom  free text the user typed, run as a search and presented as a
- *           catalog of its own -- "London crime" is not a category any news
- *           API has, but it is a perfectly good standing query
+ *           catalog of its own -- "FIFA World Cup" is not a category any
+ *           news API has, but it is a perfectly good standing query
  */
 
 const PRESET_TOPICS = [
@@ -64,7 +64,7 @@ function isCustomTopicId(id) {
   return typeof id === "string" && id.startsWith(CUSTOM_PREFIX);
 }
 
-/** Collapse runs of whitespace so " London   crime " and "London crime" match. */
+/** Collapse runs of whitespace so " FIFA  World Cup " and "FIFA World Cup" match. */
 function tidyQuery(value) {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ") : "";
 }
