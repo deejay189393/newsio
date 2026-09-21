@@ -1,5 +1,5 @@
-const { renderConfigurePage, escapeHtml } = require("../src/configurePage");
-const { TOPICS, LANGUAGES } = require("../src/topics");
+const { renderConfigurePage, escapeHtml, orderedProviders } = require("../src/configurePage");
+const { TOPICS, LANGUAGES, PROVIDERS } = require("../src/providers");
 
 const BASE = "https://newsio.up.railway.app";
 const checkedBoxes = (html) => (html.match(/\schecked\s\/>/g) || []).length;
@@ -22,10 +22,26 @@ describe("renderConfigurePage — first-time configuration", () => {
     expect(html.trim().endsWith("</html>")).toBe(true);
   });
 
-  test("leaves the API key field empty and no topic checked", () => {
-    expect(html).toContain('id="apiKey"');
-    expect(html).toContain('value=""');
+  test("offers every provider, with all key fields empty and no topic checked", () => {
+    PROVIDERS.forEach((p) => expect(html).toContain(`data-provider="${p.id}"`));
+    expect((html.match(/class="source-key"/g) || [])).toHaveLength(PROVIDERS.length);
     expect(checkedBoxes(html)).toBe(0);
+  });
+
+  test("explains that the order is the failover order", () => {
+    expect(html).toContain("top to bottom");
+    expect(html).toContain("failover chain");
+  });
+
+  test("each source carries its own signup link and trade-offs", () => {
+    PROVIDERS.forEach((p) => {
+      expect(html).toContain(p.signupUrl);
+      expect(html).toContain(escapeHtml(p.notes));
+    });
+  });
+
+  test("warns about the delayed source where the choice is made", () => {
+    expect(html).toContain("12h delay");
   });
 
   test("does not show the re-configuration banner", () => {
@@ -54,9 +70,7 @@ describe("renderConfigurePage — first-time configuration", () => {
 
   test("shows the addon tagline, matching the manifest description", () => {
     const { DESCRIPTION } = require("../src/manifest");
-    expect(html).toContain("News on Stremio? Why not! Uses the newsdata.io API.");
     expect(html).toContain(DESCRIPTION);
-    expect(html).not.toContain("Live news in Stremio, powered by newsdata.io.");
   });
 
   test("uses the newspaper logo for both the header art and the favicon", () => {
@@ -72,10 +86,17 @@ describe("renderConfigurePage — first-time configuration", () => {
 });
 
 describe("renderConfigurePage — re-configuration", () => {
-  const existing = { apiKey: "pub_secret123", topics: ["technology", "business"], language: "fr" };
+  const existing = {
+    sources: [
+      { provider: "newsdata", apiKey: "pub_secret123" },
+      { provider: "currents", apiKey: "cur_abc" }
+    ],
+    topics: ["technology", "business"],
+    language: "fr"
+  };
   const html = renderConfigurePage({ baseUrl: BASE, existing });
 
-  test("pre-fills the saved API key", () => {
+  test("pre-fills every saved API key", () => {
     expect(html).toContain("pub_secret123");
   });
 
@@ -96,15 +117,57 @@ describe("renderConfigurePage — re-configuration", () => {
   test("escapes a hostile API key rather than injecting script", () => {
     const evil = renderConfigurePage({
       baseUrl: BASE,
-      existing: { apiKey: '"><script>alert(1)</script>', topics: [], language: "en" }
+      existing: {
+        sources: [{ provider: "newsdata", apiKey: '"><script>alert(1)</script>' }],
+        topics: [],
+        language: "en"
+      }
     });
     expect(evil).not.toContain("<script>alert(1)</script>");
     expect(evil).toContain("&lt;script&gt;");
   });
 
   test("handles a config with no topics selected", () => {
-    const empty = renderConfigurePage({ baseUrl: BASE, existing: { apiKey: "k", topics: [], language: "en" } });
+    const empty = renderConfigurePage({
+      baseUrl: BASE,
+      existing: { sources: [{ provider: "currents", apiKey: "k" }], topics: [], language: "en" }
+    });
     expect(checkedBoxes(empty)).toBe(0);
     expect(empty).toContain("Editing your current setup");
+  });
+});
+
+describe("orderedProviders — the saved failover order is shown back", () => {
+  test("saved sources come first, in their order", () => {
+    const existing = { sources: [{ provider: "gnews", apiKey: "g" }, { provider: "newsdata", apiKey: "n" }] };
+    expect(orderedProviders(existing).map((p) => p.id)).toEqual(["gnews", "newsdata", "currents"]);
+  });
+
+  test("unconfigured providers follow, in the default order", () => {
+    expect(orderedProviders({ sources: [{ provider: "newsdata", apiKey: "n" }] }).map((p) => p.id)).toEqual([
+      "newsdata",
+      "currents",
+      "gnews"
+    ]);
+  });
+
+  test("with nothing saved the default order stands", () => {
+    expect(orderedProviders(null).map((p) => p.id)).toEqual(["currents", "newsdata", "gnews"]);
+    expect(orderedProviders({}).map((p) => p.id)).toEqual(["currents", "newsdata", "gnews"]);
+  });
+
+  test("an unknown saved provider is ignored rather than crashing the page", () => {
+    expect(orderedProviders({ sources: [{ provider: "nope", apiKey: "x" }] }).map((p) => p.id)).toEqual([
+      "currents",
+      "newsdata",
+      "gnews"
+    ]);
+  });
+
+  test("the rendered card order matches", () => {
+    const existing = { sources: [{ provider: "gnews", apiKey: "g" }], topics: [], language: "en" };
+    const markup = renderConfigurePage({ baseUrl: BASE, existing });
+    const order = [...markup.matchAll(/data-provider="([a-z]+)"/g)].map((m) => m[1]);
+    expect(order).toEqual(["gnews", "currents", "newsdata"]);
   });
 });

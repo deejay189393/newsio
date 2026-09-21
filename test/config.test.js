@@ -1,77 +1,147 @@
-const { encodeConfig, decodeConfig } = require("../src/config");
+const { encodeConfig, decodeConfig, normalizeSources, isConfigured, unusedProviders } = require("../src/config");
 
-describe("config encode/decode", () => {
-  test("round-trips a normal config", () => {
-    const cfg = { apiKey: "pub_abc123", topics: ["technology", "business"], language: "en" };
+const CUR = { provider: "currents", apiKey: "cur-key" };
+const ND = { provider: "newsdata", apiKey: "nd-key" };
+
+describe("encode / decode round trip", () => {
+  test("a normal config survives intact", () => {
+    const cfg = { sources: [CUR, ND], topics: ["technology", "top"], language: "fr" };
     expect(decodeConfig(encodeConfig(cfg))).toEqual(cfg);
   });
 
-  test("produces a single URL path segment (no raw slashes)", () => {
-    const encoded = encodeConfig({ apiKey: "a/b", topics: ["top"], language: "en" });
-    expect(encoded).not.toContain("/");
+  test("survives Express having already decoded the route param", () => {
+    const cfg = { sources: [CUR], topics: ["top"], language: "en" };
+    const encoded = encodeConfig(cfg);
+    expect(decodeConfig(decodeURIComponent(encoded))).toEqual(cfg);
   });
 
-  test("round-trips after Express has already decoded the route param", () => {
-    const cfg = { apiKey: "pub_abc/123 xyz?&=", topics: ["top"], language: "en" };
-    const asExpressWouldGiveIt = decodeURIComponent(encodeConfig(cfg));
-    expect(decodeConfig(asExpressWouldGiveIt)).toEqual(cfg);
-  });
-
-  test("round-trips non-ASCII characters", () => {
-    const cfg = { apiKey: "pub_ünïcødé_✓", topics: ["top"], language: "de" };
+  test("survives non-ASCII in a key", () => {
+    const cfg = { sources: [{ provider: "currents", apiKey: "clé-éñ-日本" }], topics: ["top"], language: "en" };
     expect(decodeConfig(encodeConfig(cfg))).toEqual(cfg);
   });
 
-  test("filters out invalid topic ids", () => {
-    const encoded = encodeConfig({ apiKey: "x", topics: ["technology", "not-a-topic"], language: "en" });
-    expect(decodeConfig(encoded).topics).toEqual(["technology"]);
+  test("the config is a single path segment", () => {
+    expect(encodeConfig({ sources: [CUR], topics: ["top"], language: "en" })).not.toContain("/");
   });
 
-  test("falls back to English for an unrecognized language", () => {
-    expect(decodeConfig(encodeConfig({ apiKey: "x", topics: ["top"], language: "xx-nope" })).language).toBe("en");
+  test("survives a literal % that is not a valid escape", () => {
+    expect(decodeConfig('{"sources":[{"provider":"currents","apiKey":"100%"}],"topics":["top"]}')).toEqual({
+      sources: [{ provider: "currents", apiKey: "100%" }],
+      topics: ["top"],
+      language: "en"
+    });
   });
 
-  test("encodeConfig applies defaults for a sparse object", () => {
-    expect(decodeConfig(encodeConfig({}))).toEqual({ apiKey: "", topics: [], language: "en" });
+  test("applies defaults to a sparse object", () => {
+    expect(decodeConfig(encodeConfig({}))).toEqual({ sources: [], topics: [], language: "en" });
+  });
+});
+
+describe("decodeConfig rejects what is not our shape", () => {
+  test.each([
+    ["an empty segment", ""],
+    ["null", null],
+    ["undefined", undefined],
+    ["not JSON at all", "garbage-not-json"],
+    ["a JSON array", "[1,2,3]"],
+    ["a JSON string", '"hello"'],
+    ["JSON null", "null"],
+    ["a JSON number", "42"]
+  ])("%s decodes to null", (_label, raw) => {
+    expect(decodeConfig(raw)).toBeNull();
+  });
+});
+
+describe("normalizeSources — the failover chain", () => {
+  test("keeps the user's order, because the order is the setting", () => {
+    expect(normalizeSources([ND, CUR]).map((s) => s.provider)).toEqual(["newsdata", "currents"]);
+    expect(normalizeSources([CUR, ND]).map((s) => s.provider)).toEqual(["currents", "newsdata"]);
   });
 
-  test("encodeConfig coerces a non-array topics value to []", () => {
-    expect(decodeConfig(encodeConfig({ apiKey: "x", topics: "technology" })).topics).toEqual([]);
+  test("trims keys", () => {
+    expect(normalizeSources([{ provider: "currents", apiKey: "  k  " }])[0].apiKey).toBe("k");
   });
 
-  test("decode defaults topics to [] when missing or non-array", () => {
-    expect(decodeConfig(encodeURIComponent(JSON.stringify({ apiKey: "x" }))).topics).toEqual([]);
-    expect(decodeConfig(encodeURIComponent(JSON.stringify({ apiKey: "x", topics: 5 }))).topics).toEqual([]);
+  // Two keys for the same API would fail over into the same quota.
+  test("allows each provider only once, keeping the first", () => {
+    const out = normalizeSources([CUR, { provider: "currents", apiKey: "second" }, ND]);
+    expect(out).toEqual([CUR, ND]);
   });
 
-  test("trims the apiKey and coerces a missing/non-string one to an empty string", () => {
-    expect(decodeConfig(encodeURIComponent(JSON.stringify({ apiKey: "  x  " }))).apiKey).toBe("x");
-    expect(decodeConfig(encodeURIComponent(JSON.stringify({ topics: [] }))).apiKey).toBe("");
-    expect(decodeConfig(encodeURIComponent(JSON.stringify({ apiKey: 12345 }))).apiKey).toBe("");
+  test.each([
+    ["an unknown provider", { provider: "nope", apiKey: "k" }],
+    ["a missing key", { provider: "currents", apiKey: "" }],
+    ["a whitespace-only key", { provider: "currents", apiKey: "   " }],
+    ["a non-string key", { provider: "currents", apiKey: 42 }],
+    ["a missing provider", { apiKey: "k" }],
+    ["a null entry", null],
+    ["a string entry", "currents"],
+    ["a number entry", 7]
+  ])("drops %s", (_label, entry) => {
+    expect(normalizeSources([entry])).toEqual([]);
   });
 
-  test("returns null for empty/absent input", () => {
-    expect(decodeConfig("")).toBeNull();
-    expect(decodeConfig(null)).toBeNull();
-    expect(decodeConfig(undefined)).toBeNull();
+  test.each([[undefined], [null], ["currents"], [42], [{}]])("%p yields an empty chain", (sources) => {
+    expect(normalizeSources(sources)).toEqual([]);
   });
 
-  test("returns null for non-JSON input", () => {
-    expect(decodeConfig("not json at all")).toBeNull();
-    expect(decodeConfig("manifest.json")).toBeNull();
+  test("keeps the good entries alongside the bad", () => {
+    expect(normalizeSources([{ provider: "nope", apiKey: "k" }, CUR, null, ND])).toEqual([CUR, ND]);
+  });
+});
+
+describe("topics and language validation", () => {
+  test("unknown topics are dropped, known ones kept in order", () => {
+    expect(decodeConfig(JSON.stringify({ topics: ["nope", "technology", "bogus", "top"] })).topics).toEqual([
+      "technology",
+      "top"
+    ]);
   });
 
-  test("returns null when the JSON parses to a non-object", () => {
-    expect(decodeConfig(encodeURIComponent(JSON.stringify("a string")))).toBeNull();
-    expect(decodeConfig(encodeURIComponent(JSON.stringify(42)))).toBeNull();
-    expect(decodeConfig(encodeURIComponent(JSON.stringify(null)))).toBeNull();
-    expect(decodeConfig(encodeURIComponent(JSON.stringify(["a"])))).toBeNull();
+  test.each([["en"], ["fr"], ["ja"]])("keeps the supported language %p", (language) => {
+    expect(decodeConfig(JSON.stringify({ language })).language).toBe(language);
   });
 
-  test("survives a literal % that is not a valid percent-escape", () => {
-    expect(() => decodeConfig("100% not json")).not.toThrow();
-    expect(decodeConfig("100% not json")).toBeNull();
-    // ...and still parses valid JSON that contains one
-    expect(decodeConfig('{"apiKey":"100%","topics":[],"language":"en"}').apiKey).toBe("100%");
+  test.each([["klingon"], [42], [null], [undefined], [""]])("falls back to English for %p", (language) => {
+    expect(decodeConfig(JSON.stringify({ language })).language).toBe("en");
+  });
+});
+
+describe("isConfigured", () => {
+  test("needs both a usable source and a topic", () => {
+    expect(isConfigured({ sources: [CUR], topics: ["top"] })).toBe(true);
+    expect(isConfigured({ sources: [CUR], topics: [] })).toBe(false);
+    expect(isConfigured({ sources: [], topics: ["top"] })).toBe(false);
+    expect(isConfigured({})).toBe(false);
+    expect(isConfigured(null)).toBe(false);
+  });
+
+  test("a source that normalizes away does not count", () => {
+    expect(isConfigured({ sources: [{ provider: "currents", apiKey: "  " }], topics: ["top"] })).toBe(false);
+    expect(isConfigured({ sources: [{ provider: "nope", apiKey: "k" }], topics: ["top"] })).toBe(false);
+  });
+
+  test("a topic that normalizes away does not count", () => {
+    expect(isConfigured({ sources: [CUR], topics: ["nope"] })).toBe(false);
+  });
+});
+
+describe("unusedProviders", () => {
+  test("lists what the user has not configured yet", () => {
+    expect(unusedProviders({ sources: [CUR] }).map((p) => p.id)).toEqual(["newsdata", "gnews"]);
+    expect(unusedProviders({ sources: [CUR, ND] }).map((p) => p.id)).toEqual(["gnews"]);
+  });
+
+  test("lists everything when nothing is configured", () => {
+    expect(unusedProviders({}).map((p) => p.id)).toEqual(["currents", "newsdata", "gnews"]);
+    expect(unusedProviders(null).map((p) => p.id)).toEqual(["currents", "newsdata", "gnews"]);
+  });
+});
+
+describe("keys are never persisted", () => {
+  test("the whole config lives in the URL segment and nowhere else", () => {
+    const encoded = encodeConfig({ sources: [CUR, ND], topics: ["top"], language: "en" });
+    const decoded = JSON.parse(decodeURIComponent(encoded));
+    expect(decoded.sources.map((s) => s.apiKey)).toEqual(["cur-key", "nd-key"]);
   });
 });

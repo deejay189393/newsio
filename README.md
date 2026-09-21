@@ -1,10 +1,37 @@
 # Newsio — a Stremio news addon
 
-Newsio turns live headlines from [newsdata.io](https://newsdata.io) into Stremio
-catalogs: one catalog per topic you pick, searchable from inside Stremio, with
-real metadata for every story and a playable stream when the story has video.
+Newsio turns live headlines into Stremio catalogs: one catalog per topic you
+pick, searchable from inside Stremio, with real metadata for every story and a
+playable stream when the story has video.
+
+It reads from **three news APIs**, and you can configure more than one. They
+become a failover chain — when one hits its free-tier limit, Newsio moves to
+the next, so your catalogs stay full instead of going empty.
 
 **Live instance:** https://newsio.up.railway.app/configure
+
+---
+
+## News sources
+
+| Source | Freshness | Per request | Video | Topics covered |
+|---|---|---|---|---|
+| [Currents](https://currentsapi.services) | **minutes** | 20 (a whole page, 1 credit) | no | 16 of 17 |
+| [newsdata.io](https://newsdata.io) | minutes | 10 (a page costs 2 credits) | **yes** | 17 of 17 |
+| [GNews](https://gnews.io) | **12 hours behind** on the free plan | 10 (a page costs 2 credits) | no | 11 of 17 |
+
+Measured, not quoted from the docs: sampled against all three at the same
+moment, the newest article Currents offered was **6 minutes old** and the
+newest GNews offered was **12.2 hours old**, with every article in the sample
+at least that stale. GNews's free plan states the delay outright, and caps the
+key at 100 requests a day.
+
+That makes GNews a poor *primary* source for an addon whose whole pitch is live
+news — but a perfectly reasonable *last resort*, which is why it is offered and
+why the configure page labels it. Stale news beats an empty shelf.
+
+Only newsdata.io carries video, so the ▶ marker only ever appears on stories it
+served.
 
 ---
 
@@ -17,6 +44,10 @@ real metadata for every story and a playable stream when the story has video.
   whole addon, so a query returns one result row -- labelled **Newsio** -- that
   queries newsdata.io live across every category, rather than filtering a local
   list. The topic catalogs are browse-only.
+- **Failover across sources.** Configure two or three keys and order them.
+  Newsio tries them top to bottom and moves on whenever one is rate-limited,
+  rejected or down — and remembers the failure for ten minutes so the next
+  page does not begin with the same dead round trip.
 - **20 stories per page, and pagination that works.** Catalogs declare `skip`
   *with explicit step options*, which is what lets a page be anything other
   than 100 items (see *Pagination* below).
@@ -97,15 +128,55 @@ the SDK's single static manifest can't express.
 
 ## How your settings are stored
 
-They aren't — not on the server. Your API key, topics and language are encoded
-into your own addon URL as one path segment, using the SDK's native convention:
+They aren't — not on the server. Your keys, their failover order, your topics
+and your language are encoded into your own addon URL as one path segment,
+using the SDK's native convention:
 
 ```js
-encodeURIComponent(JSON.stringify({ apiKey, topics, language }))
+encodeURIComponent(JSON.stringify({ sources, topics, language }))
+
+// sources is ordered — the order is the failover chain:
+[{ provider: "currents", apiKey: "…" }, { provider: "newsdata", apiKey: "…" }]
 ```
 
+Each provider may appear once: two keys for the same API would only fail over
+into the same quota.
+
 The deployment holds no database and no secrets. The flip side: **your install
-URL contains your API key, so don't share it publicly.**
+URL contains every API key you entered, so don't share it publicly.**
+
+## Failover
+
+`sources` in your config is an ordered list of `{ provider, apiKey }`. The
+order is the setting: Newsio walks it and returns the first source that
+answers.
+
+A source is skipped before it is even tried when:
+
+- it is **cooling off** after a recent failure (ten minutes), so one spent key
+  does not cost every subsequent page a dead round trip;
+- its provider **has no category for the topic** — GNews has nothing for Crime,
+  so asking it would spend a request to be told so.
+
+A source that is tried fails over when it **errors**, and when it returns an
+**empty first page** — a source with nothing to say about a topic should yield
+to one that has. A deeper page is left alone: there an empty result is the
+honest end of the feed, and failing over would splice another source's page 1
+onto this one's page 3, repeating stories the reader just scrolled past.
+
+Only quota-shaped failures (401, 403, 409, 429, 5xx, or a message naming a rate
+limit or quota) put a key on cooldown. A malformed request to one API says
+nothing about the next, so the chain continues but that key is not branded as
+spent.
+
+Article ids carry a per-provider prefix — `cu_`, `nd_`, `gn_` — so a story
+opened from your library is always resolved against the API that issued it,
+whichever source happens to be serving catalogs at the time.
+
+**One caveat worth knowing:** only newsdata.io can look up a single article by
+id. Currents and GNews have no such endpoint, so a story from those sources is
+resolvable only while it is still in the in-memory cache (one hour). Open one
+from your Stremio library a day later and it will not resolve.
 
 ## Pagination
 
@@ -235,15 +306,18 @@ Three in-memory TTL stores, each with its own lifetime and purpose:
 
 | Store | TTL | Holds |
 |---|---|---|
-| `catalogCache` | 10 min | One page of results per (topic\|search, language) |
+| `catalogCache` | 10 min | One upstream page per (provider, topic\|search, language) |
 | `articleCache` | 1 hour | Individual stories by id, so `meta`/`stream` resolve without a second API call |
-| `pageCursorCache` | 1 hour | The `nextPage` token for each page of each query |
+| `pageCursorCache` | 1 hour | newsdata.io's `nextPage` token for each page of each query |
+| `sourceCooldownCache` | 10 min | Sources that just failed, so the chain skips them |
 
-All three are bounded, evicting oldest-first, so unique search queries can't
-grow memory without limit. If an id isn't cached (expired, or the process
-restarted), `meta`/`stream` fall back to a direct id lookup against
-newsdata.io — so a story opened from your Stremio library still resolves days
-later.
+All are bounded, evicting oldest-first, so unique search queries can't grow
+memory without limit. Cache keys are namespaced per provider, so two sources
+answering the same topic never collide.
+
+If an id isn't cached (expired, or the process restarted), `meta`/`stream` fall
+back to a direct id lookup — but **only newsdata.io offers one**. A story from
+Currents or GNews is resolvable only while it is still cached.
 
 Everything is in-process, which suits a single container. `src/cache.js` is a
 small `TTLCache` class behind a `get`/`set`/`has` API, so swapping in Redis or
@@ -259,7 +333,7 @@ npm start           # http://localhost:3000/configure
 ```
 
 ```bash
-npm test            # 473 tests
+npm test            # 600 tests
 npm run test:coverage
 ```
 
@@ -346,10 +420,13 @@ semver `version`, `name`, `description`, `logo`, `background` and `contactEmail`
 
 ## Notes
 
-- **newsdata.io free tier** is rate-limited and returns 10 articles per request,
-  so each 20-item catalog page costs two API credits (cached for 10 minutes).
-  The caching above is tuned to stay within it. Empty catalogs usually mean a
-  spent quota or a bad key — check your newsdata.io dashboard.
+- **Free tiers are tight.** A 20-item page costs 1 credit on Currents and 2 on
+  newsdata.io or GNews. Caching is tuned to stay inside them, and configuring
+  more than one source is the real answer — that is what failover is for.
+  Catalogs going empty across *every* configured source usually means every
+  quota is spent or every key is bad; the server logs each attempt with the
+  reason it failed.
+- **GNews is 12 hours behind** on its free plan, by design. Put it last.
 - **Articles aren't video files.** Most stories open in your browser via
   Stremio's `externalUrl` stream; only stories with a `video_url` actually play.
 

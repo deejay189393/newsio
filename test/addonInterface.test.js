@@ -1,6 +1,7 @@
 const { clearAllCaches } = require("../src/cache");
 const { createAddonInterface } = require("../src/addonInterface");
-const { CATALOG_PAGE_SIZE, UPSTREAM_PAGE_SIZE } = require("../src/newsdata");
+const { CATALOG_PAGE_SIZE } = require("../src/articles");
+const UPSTREAM_PAGE_SIZE = require("../src/providers/newsdata").UPSTREAM_PAGE_SIZE;
 const { SEARCH_CATALOG_ID } = require("../src/manifest");
 
 let iface;
@@ -18,7 +19,7 @@ const article = (id, extra = {}) => ({
   link: `https://example.com/${id}`,
   ...extra
 });
-const CONFIG = { apiKey: "k", topics: ["technology"], language: "en" };
+const CONFIG = { sources: [{ provider: "newsdata", apiKey: "k" }], topics: ["technology"], language: "en" };
 
 describe("catalog handler", () => {
   test("returns metas for a valid topic and config", async () => {
@@ -41,19 +42,19 @@ describe("catalog handler", () => {
 
   test("uses the configured language", async () => {
     global.fetch = jest.fn().mockResolvedValue(ok({ results: [], nextPage: null }));
-    await iface.get("catalog", "news", "technology", {}, { apiKey: "k", language: "ja" });
+    await iface.get("catalog", "news", "technology", {}, { sources: [{ provider: "newsdata", apiKey: "k" }], language: "ja" });
     expect(new URL(global.fetch.mock.calls[0][0]).searchParams.get("language")).toBe("ja");
   });
 
   test("falls back to English when a hand-edited URL carries an unknown language", async () => {
     global.fetch = jest.fn().mockResolvedValue(ok({ results: [], nextPage: null }));
-    await iface.get("catalog", "news", "technology", {}, { apiKey: "k", language: "zz-not-real" });
+    await iface.get("catalog", "news", "technology", {}, { sources: [{ provider: "newsdata", apiKey: "k" }], language: "zz-not-real" });
     expect(new URL(global.fetch.mock.calls[0][0]).searchParams.get("language")).toBe("en");
   });
 
   test("falls back to English when the language is a non-string", async () => {
     global.fetch = jest.fn().mockResolvedValue(ok({ results: [], nextPage: null }));
-    await iface.get("catalog", "news", "technology", {}, { apiKey: "k", language: 42 });
+    await iface.get("catalog", "news", "technology", {}, { sources: [{ provider: "newsdata", apiKey: "k" }], language: 42 });
     expect(new URL(global.fetch.mock.calls[0][0]).searchParams.get("language")).toBe("en");
   });
 

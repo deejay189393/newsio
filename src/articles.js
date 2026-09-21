@@ -1,0 +1,157 @@
+/**
+ * The article shape every provider normalizes to, and the text handling that
+ * is the same whoever supplied the story.
+ *
+ * Providers differ in their pagination, their category vocabulary and their
+ * field names; none of that belongs here. What does belong here is the
+ * contract the rest of the addon codes against.
+ */
+
+/** How many articles one catalog request returns to the client. */
+const CATALOG_PAGE_SIZE = 20;
+
+/**
+ * Fields an API fills with an upsell string rather than content on a free
+ * tier -- newsdata.io returns "ONLY AVAILABLE IN PAID PLANS" for `content`,
+ * `ai_summary` and others. Treated as absent so a placeholder can never be
+ * shown to a reader as if it were the article.
+ */
+const PAID_PLAN_PLACEHOLDER = /^ONLY AVAILABLE IN [A-Z ]+PLANS?$/i;
+
+/**
+ * Publishers hand these APIs HTML-escaped text and it is passed through
+ * verbatim, so a keyword arrives as "telco &amp; isp" and renders with the
+ * entity showing. Everything downstream is JSON for Stremio rather than
+ * markup, so text is decoded once, at the boundary.
+ */
+const NAMED_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+
+function decodeEntities(text) {
+  return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, entity) => {
+    if (entity[0] === "#") {
+      const code =
+        entity[1].toLowerCase() === "x" ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1), 10);
+      if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff) return match;
+      if (code >= 0xd800 && code <= 0xdfff) return match;
+      return String.fromCodePoint(code);
+    }
+    const named = NAMED_ENTITIES[entity.toLowerCase()];
+    return named === undefined ? match : named;
+  });
+}
+
+function realText(value) {
+  const text = typeof value === "string" ? decodeEntities(value).trim() : "";
+  return !text || PAID_PLAN_PLACEHOLDER.test(text) ? "" : text;
+}
+
+/**
+ * Our Stremio-facing id for an article.
+ *
+ * Stability matters: Stremio stores these in its library and asks for /meta
+ * and /stream by id long after the catalog request that surfaced the item.
+ * The provider's own id is used verbatim behind a per-provider prefix, which
+ * is also what lets a later lookup know which API to ask. The link/title
+ * fallback is deterministic, so the same story always yields the same id.
+ */
+function makeArticleId(prefix, { id, link, title }) {
+  const source = id || Buffer.from(link || title || "", "utf8").toString("base64url");
+  return `${prefix}${source}`;
+}
+
+/**
+ * Neither newsdata.io nor Currents flags advertising. Tested directly: they
+ * expose content-type fields and duplicate flags, and nothing marking
+ * sponsored or affiliate content -- a plain affiliate post ("Power outages
+ * happen: save up to 57% on EcoFlow power stations", USA Today) arrives as
+ * ordinary news. So the signals that do exist are used instead.
+ *
+ * `source_priority` (newsdata only) ranks the publisher, lower being more
+ * reputable: Google News 14, CNN 165, while SEO content farms sit orders of
+ * magnitude higher. The cut is deliberately far above every genuine outlet
+ * observed -- the least reputable real publisher in the sample was 1,200,410.
+ */
+const LOW_QUALITY_SOURCE_PRIORITY = 2000000;
+
+/**
+ * Commerce wording that reporting does not use. Kept narrow on purpose: a
+ * discount in a headline is often the news itself ("Government cuts rail
+ * fares by 50%"), so only retail phrasing counts.
+ */
+const COMMERCE_PHRASES = [
+  /\bsave up to\b/i,
+  /\b\d{1,3}% off\b/i,
+  /\bbest deals?\b/i,
+  /\bdeal of the (day|week)\b/i,
+  /\btop deals\b/i,
+  /\bcoupon(s| code)?\b/i,
+  /\bshop now\b/i,
+  /\bon sale now\b/i,
+  /\bdiscount code\b/i,
+  /\bprime day deals?\b/i,
+  /\bblack friday deals?\b/i
+];
+
+function isLowQuality(article) {
+  if (typeof article.sourcePriority === "number" && article.sourcePriority > LOW_QUALITY_SOURCE_PRIORITY) {
+    return true;
+  }
+  const text = `${article.title || ""} ${article.description || ""}`;
+  return COMMERCE_PHRASES.some((pattern) => pattern.test(text));
+}
+
+/**
+ * Assemble one catalog page from fixed-size upstream pages.
+ *
+ * `skip` is the addon protocol's absolute item offset -- "the number of
+ * items skipped from the beginning of the catalog" -- not a page number, so
+ * it is mapped onto upstream pages by arithmetic rather than assumed to land
+ * on a boundary. `loadPage(index)` returns { articles, hasMore } for one
+ * upstream page; the caller decides how that page is fetched.
+ */
+async function assembleCatalogPage({ skip, upstreamPageSize, loadPage }) {
+  const offset = Math.max(0, Math.floor(Number(skip) || 0));
+  const firstPage = Math.floor(offset / upstreamPageSize);
+  const offsetWithinFirstPage = offset % upstreamPageSize;
+  const pagesNeeded = Math.ceil((offsetWithinFirstPage + CATALOG_PAGE_SIZE) / upstreamPageSize);
+
+  const collected = [];
+  const seen = new Set();
+  let hasMore = false;
+
+  for (let i = firstPage; i < firstPage + pagesNeeded; i++) {
+    const page = await loadPage(i);
+    if (!page) return { articles: [], hasMore: false, truncated: true };
+
+    page.articles.forEach((article) => {
+      // Upstream pages should not overlap, but a story can reappear after
+      // the feed shifts between two calls; never emit it twice.
+      if (seen.has(article.id)) return;
+      seen.add(article.id);
+      collected.push(article);
+    });
+
+    hasMore = Boolean(page.hasMore);
+    if (!page.hasMore) break;
+  }
+
+  // Sliced before filtering, deliberately: the slice positions come from
+  // unfiltered upstream order, so each catalog page maps to a fixed span of
+  // upstream results no matter what is dropped. Filtering first would make
+  // the span drift and pages would start overlapping.
+  const articles = collected
+    .slice(offsetWithinFirstPage, offsetWithinFirstPage + CATALOG_PAGE_SIZE)
+    .filter((article) => !isLowQuality(article));
+
+  return { articles, hasMore, truncated: false };
+}
+
+module.exports = {
+  CATALOG_PAGE_SIZE,
+  decodeEntities,
+  realText,
+  makeArticleId,
+  isLowQuality,
+  assembleCatalogPage,
+  LOW_QUALITY_SOURCE_PRIORITY
+};

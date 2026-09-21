@@ -1,5 +1,6 @@
-const { TOPICS, getTopicById } = require("./topics");
-const { CATALOG_PAGE_SIZE } = require("./newsdata");
+const { TOPICS, getTopicById, PROVIDERS } = require("./providers");
+const { CATALOG_PAGE_SIZE } = require("./articles");
+const { isConfigured } = require("./config");
 
 /**
  * Custom content type, deliberately NOT "movie"/"series"/"channel".
@@ -11,10 +12,16 @@ const { CATALOG_PAGE_SIZE } = require("./newsdata");
  */
 const CONTENT_TYPE = "news";
 
+/**
+ * One prefix per provider, so Stremio routes every id we mint back to us and
+ * a later /meta lookup can tell which API issued it.
+ */
+const ID_PREFIXES = PROVIDERS.map((p) => p.idPrefix);
+
 const ADDON_ID = "org.deejay189393.newsio";
-const ADDON_VERSION = "0.4.3";
+const ADDON_VERSION = "0.5.0";
 const CONTACT_EMAIL = "deejay189393@users.noreply.github.com";
-const DESCRIPTION = "News on Stremio? Why not! Uses the newsdata.io API.";
+const DESCRIPTION = "News on Stremio? Why not! Reads live headlines from newsdata.io, Currents and GNews.";
 
 /**
  * Search is served by ONE catalog for the whole addon, not by every topic.
@@ -106,20 +113,6 @@ function getStremioAddonsConfig() {
   };
 }
 
-/**
- * Is this configuration complete enough for the addon to actually work?
- *
- * Both halves are load-bearing. Without an API key every catalog request
- * returns an empty list, and without a topic there are no catalogs to
- * request at all -- either way the addon installs and then does nothing.
- * This is what `behaviorHints.configurationRequired` below is driven from,
- * so a half-filled config is treated exactly like no config.
- */
-function isConfigured(config) {
-  const hasApiKey = Boolean(config && typeof config.apiKey === "string" && config.apiKey.trim());
-  return hasApiKey && selectedTopics(config).length > 0;
-}
-
 // Guards the shape rather than trusting it: decodeConfig normalizes `topics`
 // to an array before the HTTP routes ever get here, but buildManifest is
 // exported and should not throw on a hand-built object.
@@ -156,7 +149,7 @@ function baseManifest(baseUrl) {
     contactEmail: CONTACT_EMAIL,
     resources: ["catalog", "meta", "stream"],
     types: [CONTENT_TYPE],
-    idPrefixes: ["nd_"],
+    idPrefixes: ID_PREFIXES,
     catalogs: [],
     behaviorHints: {
       configurable: true,
@@ -218,7 +211,7 @@ function buildInterfaceManifest() {
     contactEmail: CONTACT_EMAIL,
     resources: ["catalog", "meta", "stream"],
     types: [CONTENT_TYPE],
-    idPrefixes: ["nd_"],
+    idPrefixes: ID_PREFIXES,
     catalogs: [...TOPICS.map(topicCatalog), searchCatalog()],
     config: [{ key: "apiKey", type: "password", title: "newsdata.io API Key" }],
     behaviorHints: { configurable: true, configurationRequired: true }
@@ -230,7 +223,6 @@ module.exports = {
   getUnconfiguredManifest,
   buildInterfaceManifest,
   getStremioAddonsConfig,
-  isConfigured,
   CONTENT_TYPE,
   ADDON_ID,
   ADDON_VERSION,

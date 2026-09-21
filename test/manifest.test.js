@@ -1,7 +1,8 @@
-const { TOPICS } = require("../src/topics");
+const { TOPICS } = require("../src/providers");
 
 const BASE_URL = "https://newsio.up.railway.app";
 const KEY = "pub_testkey";
+const { isConfigured } = require("../src/config");
 
 // manifest.js reads process.env at call time, so each test can vary it.
 let M;
@@ -13,12 +14,12 @@ beforeEach(() => {
 });
 
 describe("manifest basics", () => {
-  test("version is 0.4.3", () => {
-    expect(M.ADDON_VERSION).toBe("0.4.3");
+  test("version is 0.5.0", () => {
+    expect(M.ADDON_VERSION).toBe("0.5.0");
   });
 
   test("uses the short addon description", () => {
-    expect(M.DESCRIPTION).toBe("News on Stremio? Why not! Uses the newsdata.io API.");
+    expect(M.DESCRIPTION).toBe("News on Stremio? Why not! Reads live headlines from newsdata.io, Currents and GNews.");
     expect(M.getUnconfiguredManifest(BASE_URL).description).toBe(M.DESCRIPTION);
   });
 
@@ -27,8 +28,10 @@ describe("manifest basics", () => {
     expect(M.getUnconfiguredManifest(BASE_URL).types).toEqual(["news"]);
   });
 
-  test("declares the nd_ id prefix so Stremio only routes our ids to us", () => {
-    expect(M.getUnconfiguredManifest(BASE_URL).idPrefixes).toEqual(["nd_"]);
+  test("declares one id prefix per provider, so every id we mint routes to us", () => {
+    const { PROVIDERS } = require("../src/providers");
+    expect(M.getUnconfiguredManifest(BASE_URL).idPrefixes).toEqual(PROVIDERS.map((p) => p.idPrefix));
+    expect(M.getUnconfiguredManifest(BASE_URL).idPrefixes).toEqual(["cu_", "nd_", "gn_"]);
   });
 
   test("declares catalog, meta and stream resources", () => {
@@ -50,7 +53,7 @@ describe("manifest basics", () => {
   });
 
   test("stays within the 8KB addonCollection limit", () => {
-    const full = M.buildManifest({ apiKey: KEY, topics: TOPICS.map((t) => t.id) }, BASE_URL);
+    const full = M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: TOPICS.map((t) => t.id) }, BASE_URL);
     expect(JSON.stringify(full).length).toBeLessThan(8192);
   });
 });
@@ -68,18 +71,18 @@ describe("configured manifest", () => {
   const searchCatalogOf = (m) => m.catalogs.find((c) => c.id === M.SEARCH_CATALOG_ID);
 
   test("turns each selected topic into its own catalog named after the topic", () => {
-    const m = M.buildManifest({ apiKey: "x", topics: ["technology", "business"] }, BASE_URL);
+    const m = M.buildManifest({ sources: [{ provider: "newsdata", apiKey: "x" }], topics: ["technology", "business"] }, BASE_URL);
     expect(topicCatalogs(m).map((c) => c.name)).toEqual(["Technology", "Finance & Business"]);
     expect(topicCatalogs(m).map((c) => c.id)).toEqual(["technology", "business"]);
   });
 
   test("preserves the order the user's topics were given in", () => {
-    const m = M.buildManifest({ apiKey: KEY, topics: ["sports", "top", "health"] }, BASE_URL);
+    const m = M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: ["sports", "top", "health"] }, BASE_URL);
     expect(topicCatalogs(m).map((c) => c.id)).toEqual(["sports", "top", "health"]);
   });
 
   test("topic catalogs are browse-only: skip, but no search", () => {
-    const m = M.buildManifest({ apiKey: KEY, topics: ["technology"] }, BASE_URL);
+    const m = M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: ["technology"] }, BASE_URL);
     topicCatalogs(m).forEach((c) => {
       expect(c.type).toBe("news");
       expect(c.extra).toEqual([{ name: "skip", options: M.SKIP_OPTIONS }]);
@@ -92,20 +95,20 @@ describe("configured manifest", () => {
   // "Top Stories - News", "Technology - News", "Science - News", ... all
   // showing the same articles.
   test("exactly one catalog in the whole manifest handles search", () => {
-    const m = M.buildManifest({ apiKey: KEY, topics: ["top", "technology", "science", "health"] }, BASE_URL);
+    const m = M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: ["top", "technology", "science", "health"] }, BASE_URL);
     const searchable = m.catalogs.filter((c) => c.extra.some((e) => e.name === "search"));
     expect(searchable).toHaveLength(1);
     expect(searchable[0].id).toBe(M.SEARCH_CATALOG_ID);
   });
 
   test("the search catalog is named for the addon, so the row reads \"Newsio\"", () => {
-    const m = M.buildManifest({ apiKey: KEY, topics: ["top"] }, BASE_URL);
+    const m = M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: ["top"] }, BASE_URL);
     expect(searchCatalogOf(m).name).toBe("Newsio");
     expect(M.SEARCH_CATALOG_NAME).toBe("Newsio");
   });
 
   test("the search catalog marks search required so it is not a browsable shelf", () => {
-    const m = M.buildManifest({ apiKey: KEY, topics: ["top"] }, BASE_URL);
+    const m = M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: ["top"] }, BASE_URL);
     expect(searchCatalogOf(m).extra).toEqual([
       { name: "search", isRequired: true },
       { name: "skip", options: M.SKIP_OPTIONS }
@@ -113,7 +116,7 @@ describe("configured manifest", () => {
   });
 
   test("the search catalog is appended once, after the topics", () => {
-    const m = M.buildManifest({ apiKey: KEY, topics: ["top", "world"] }, BASE_URL);
+    const m = M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: ["top", "world"] }, BASE_URL);
     expect(m.catalogs.map((c) => c.id)).toEqual(["top", "world", "search"]);
   });
 
@@ -122,31 +125,31 @@ describe("configured manifest", () => {
   });
 
   test("selecting every topic still yields exactly one search catalog", () => {
-    const m = M.buildManifest({ apiKey: KEY, topics: TOPICS.map((t) => t.id) }, BASE_URL);
+    const m = M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: TOPICS.map((t) => t.id) }, BASE_URL);
     expect(m.catalogs).toHaveLength(TOPICS.length + 1);
     expect(m.catalogs.filter((c) => c.id === M.SEARCH_CATALOG_ID)).toHaveLength(1);
   });
 
   test("with topics selected it no longer requires configuration", () => {
-    expect(M.buildManifest({ apiKey: KEY, topics: ["top"] }, BASE_URL).behaviorHints).toEqual({
+    expect(M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: ["top"] }, BASE_URL).behaviorHints).toEqual({
       configurable: true,
       configurationRequired: false
     });
   });
 
   test("with zero topics it still requires configuration", () => {
-    expect(M.buildManifest({ apiKey: KEY, topics: [] }, BASE_URL).behaviorHints.configurationRequired).toBe(true);
+    expect(M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: [] }, BASE_URL).behaviorHints.configurationRequired).toBe(true);
   });
 
   test("silently drops unknown topic ids", () => {
-    expect(topicCatalogs(M.buildManifest({ apiKey: KEY, topics: ["nope", "technology"] }, BASE_URL)).map((c) => c.id)).toEqual([
+    expect(topicCatalogs(M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: ["nope", "technology"] }, BASE_URL)).map((c) => c.id)).toEqual([
       "technology"
     ]);
   });
 
   test("no catalogs at all -- not even search -- when nothing is configured", () => {
-    expect(M.buildManifest({ apiKey: KEY, topics: [] }, BASE_URL).catalogs).toEqual([]);
-    expect(M.buildManifest({ apiKey: KEY, topics: ["nope"] }, BASE_URL).catalogs).toEqual([]);
+    expect(M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: [] }, BASE_URL).catalogs).toEqual([]);
+    expect(M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: ["nope"] }, BASE_URL).catalogs).toEqual([]);
   });
 
   test("tolerates a missing/empty config object", () => {
@@ -155,23 +158,23 @@ describe("configured manifest", () => {
   });
 
   test("stays configurable so Stremio keeps showing the Configure button", () => {
-    expect(M.buildManifest({ apiKey: KEY, topics: ["top"] }, BASE_URL).behaviorHints.configurable).toBe(true);
+    expect(M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: ["top"] }, BASE_URL).behaviorHints.configurable).toBe(true);
   });
 
   test("exposes no native config array (our own HTML page is used instead)", () => {
-    expect(M.buildManifest({ apiKey: KEY, topics: ["top"] }, BASE_URL).config).toBeUndefined();
+    expect(M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: ["top"] }, BASE_URL).config).toBeUndefined();
     expect(M.getUnconfiguredManifest(BASE_URL).config).toBeUndefined();
   });
 
   test("keeps a constant addon id across variants so reconfiguring is the same addon", () => {
-    expect(M.buildManifest({ apiKey: KEY, topics: ["top"] }, BASE_URL).id).toBe(M.ADDON_ID);
+    expect(M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: ["top"] }, BASE_URL).id).toBe(M.ADDON_ID);
     expect(M.getUnconfiguredManifest(BASE_URL).id).toBe(M.ADDON_ID);
     expect(M.buildInterfaceManifest().id).toBe(M.ADDON_ID);
   });
 });
 
 describe("pagination is declared to the client", () => {
-  const { CATALOG_PAGE_SIZE } = require("../src/newsdata");
+  const { CATALOG_PAGE_SIZE } = require("../src/articles");
 
   // Without declared options the protocol says the client assumes a page
   // size of 100 AND treats a shorter page as the end of the catalog -- so a
@@ -191,7 +194,7 @@ describe("pagination is declared to the client", () => {
   });
 
   test("every catalog -- topic and search alike -- declares the same steps", () => {
-    const m = M.buildManifest({ apiKey: KEY, topics: ["top", "world"] }, BASE_URL);
+    const m = M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: ["top", "world"] }, BASE_URL);
     m.catalogs.forEach((c) => {
       const skip = c.extra.find((e) => e.name === "skip");
       expect(skip).toBeDefined();
@@ -220,44 +223,47 @@ describe("configuration is mandatory", () => {
   });
 
   test("a complete config is the only thing that clears it", () => {
-    expect(required({ apiKey: KEY, topics: ["top"] })).toBe(false);
-    expect(M.isConfigured({ apiKey: KEY, topics: ["top"] })).toBe(true);
+    const complete = { sources: [{ provider: "currents", apiKey: KEY }], topics: ["top"] };
+    expect(required(complete)).toBe(false);
+    expect(isConfigured(complete)).toBe(true);
   });
 
   // Regression: topics alone used to clear configurationRequired, so a URL
-  // carrying topics but no key installed cleanly and then showed empty
-  // shelves forever -- every catalog request bails without an API key.
+  // carrying topics but no usable source installed cleanly and then showed
+  // empty shelves forever.
   test.each([
     ["nothing at all", {}],
     ["a null config", null],
     ["an undefined config", undefined],
-    ["topics but no key", { topics: ["top", "technology"] }],
-    ["topics but an empty key", { apiKey: "", topics: ["top"] }],
-    ["topics but a whitespace-only key", { apiKey: "   ", topics: ["top"] }],
-    ["topics but a non-string key", { apiKey: 12345, topics: ["top"] }],
-    ["a key but no topics", { apiKey: KEY, topics: [] }],
-    ["a key but no topics field", { apiKey: KEY }],
-    ["a key but only unknown topics", { apiKey: KEY, topics: ["nope", "bogus"] }],
-    ["a key but a non-array topics field", { apiKey: KEY, topics: "top" }]
+    ["topics but no sources", { topics: ["top", "technology"] }],
+    ["topics but an empty sources list", { sources: [], topics: ["top"] }],
+    ["topics but a source with no key", { sources: [{ provider: "currents", apiKey: "" }], topics: ["top"] }],
+    ["topics but a whitespace-only key", { sources: [{ provider: "currents", apiKey: "   " }], topics: ["top"] }],
+    ["topics but an unknown provider", { sources: [{ provider: "nope", apiKey: "k" }], topics: ["top"] }],
+    ["topics but a non-array sources field", { sources: "currents", topics: ["top"] }],
+    ["a source but no topics", { sources: [{ provider: "currents", apiKey: KEY }], topics: [] }],
+    ["a source but no topics field", { sources: [{ provider: "currents", apiKey: KEY }] }],
+    ["a source but only unknown topics", { sources: [{ provider: "currents", apiKey: KEY }], topics: ["nope"] }],
+    ["a source but a non-array topics field", { sources: [{ provider: "currents", apiKey: KEY }], topics: "top" }]
   ])("still requires configuration with %s", (_label, cfg) => {
     expect(required(cfg)).toBe(true);
-    expect(M.isConfigured(cfg)).toBe(false);
+    expect(isConfigured(cfg)).toBe(false);
   });
 
   test("an incomplete config advertises no catalogs at all", () => {
     expect(catalogsFor({ topics: ["top", "technology"] })).toEqual([]);
-    expect(catalogsFor({ apiKey: "", topics: ["top"] })).toEqual([]);
-    expect(catalogsFor({ apiKey: KEY, topics: [] })).toEqual([]);
+    expect(catalogsFor({ sources: [], topics: ["top"] })).toEqual([]);
+    expect(catalogsFor({ sources: [{ provider: "currents", apiKey: KEY }], topics: [] })).toEqual([]);
   });
 
   test("configurationRequired and an empty catalog list always agree", () => {
     [
       {},
       { topics: ["top"] },
-      { apiKey: "", topics: ["top"] },
-      { apiKey: KEY, topics: [] },
-      { apiKey: KEY, topics: ["nope"] },
-      { apiKey: KEY, topics: ["top"] }
+      { sources: [], topics: ["top"] },
+      { sources: [{ provider: "currents", apiKey: KEY }], topics: [] },
+      { sources: [{ provider: "currents", apiKey: KEY }], topics: ["nope"] },
+      { sources: [{ provider: "currents", apiKey: KEY }], topics: ["top"] }
     ].forEach((cfg) => {
       const m = M.buildManifest(cfg, BASE_URL);
       expect(m.behaviorHints.configurationRequired).toBe(m.catalogs.length === 0);
@@ -265,7 +271,7 @@ describe("configuration is mandatory", () => {
   });
 
   test("stays configurable in every state, so Configure is always reachable", () => {
-    [{}, { topics: ["top"] }, { apiKey: KEY, topics: ["top"] }].forEach((cfg) => {
+    [{}, { topics: ["top"] }, { sources: [{ provider: "currents", apiKey: KEY }], topics: ["top"] }].forEach((cfg) => {
       expect(M.buildManifest(cfg, BASE_URL).behaviorHints.configurable).toBe(true);
     });
     expect(M.getUnconfiguredManifest(BASE_URL).behaviorHints.configurable).toBe(true);
@@ -275,11 +281,11 @@ describe("configuration is mandatory", () => {
   // landing page to it, which would replace our own /configure page.
   test("no native config array, so Stremio opens our own configure page", () => {
     expect(M.getUnconfiguredManifest(BASE_URL).config).toBeUndefined();
-    expect(M.buildManifest({ apiKey: KEY, topics: ["top"] }, BASE_URL).config).toBeUndefined();
+    expect(M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: ["top"] }, BASE_URL).config).toBeUndefined();
   });
 
   test("behaviorHints carries exactly the two documented keys", () => {
-    expect(Object.keys(M.buildManifest({ apiKey: KEY, topics: ["top"] }, BASE_URL).behaviorHints).sort()).toEqual([
+    expect(Object.keys(M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: ["top"] }, BASE_URL).behaviorHints).sort()).toEqual([
       "configurable",
       "configurationRequired"
     ]);
@@ -319,7 +325,7 @@ describe("stremio-addons.net listing credential", () => {
   });
 
   test("is on the configured manifest too", () => {
-    expect(M.buildManifest({ apiKey: KEY, topics: ["top"] }, BASE_URL).stremioAddonsConfig.signature).toBe(ISSUED_SIGNATURE);
+    expect(M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: ["top"] }, BASE_URL).stremioAddonsConfig.signature).toBe(ISSUED_SIGNATURE);
   });
 
   test("is a well-formed compact JWE with a dir/A128CBC-HS256 header", () => {
@@ -385,7 +391,7 @@ describe("internal interface manifest", () => {
   // would 404 on a catalog the user can see.
   test("internal search catalog matches the served one", () => {
     const internal = M.buildInterfaceManifest().catalogs.find((c) => c.id === M.SEARCH_CATALOG_ID);
-    const served = M.buildManifest({ apiKey: KEY, topics: ["top"] }, BASE_URL).catalogs.find(
+    const served = M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: ["top"] }, BASE_URL).catalogs.find(
       (c) => c.id === M.SEARCH_CATALOG_ID
     );
     expect(internal).toEqual(served);

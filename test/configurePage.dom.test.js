@@ -50,9 +50,16 @@ function loadPage(options = {}) {
       form.dispatchEvent(event);
       return event;
     },
-    setKey: (v) => {
-      document.getElementById("apiKey").value = v;
+    setKey: (provider, v) => {
+      document.querySelector(`.source[data-provider="${provider}"] .source-key`).value = v;
+      document.getElementById("sources-list").dispatchEvent(new dom.window.Event("input", { bubbles: true }));
     },
+    click: (selector) => {
+      document.querySelector(selector).dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+    },
+    cardOrder: () =>
+      Array.from(document.querySelectorAll(".source")).map((el) => el.getAttribute("data-provider")),
+    ranks: () => Array.from(document.querySelectorAll(".source-rank")).map((el) => el.textContent),
     check: (...ids) => {
       ids.forEach((id) => {
         document.querySelector(`input[name="topics"][value="${id}"]`).checked = true;
@@ -86,7 +93,7 @@ describe("configure page — the inline script runs at all", () => {
 describe("configure page — Generate install link", () => {
   test("prevents the native form submit that would reload the page", () => {
     const page = loadPage();
-    page.setKey("pub_abc123");
+    page.setKey("newsdata", "pub_abc123");
     page.check("technology");
     const event = page.submit();
     expect(event.defaultPrevented).toBe(true);
@@ -94,7 +101,7 @@ describe("configure page — Generate install link", () => {
 
   test("reveals the result box and fills both the install link and the URL", () => {
     const page = loadPage();
-    page.setKey("pub_abc123");
+    page.setKey("newsdata", "pub_abc123");
     page.check("technology", "world");
     page.submit();
 
@@ -111,7 +118,7 @@ describe("configure page — Generate install link", () => {
 
   test("the generated URL carries a config the server can decode back", () => {
     const page = loadPage();
-    page.setKey("pub_abc123");
+    page.setKey("newsdata", "pub_abc123");
     page.check("technology", "world");
     page.submit();
 
@@ -119,7 +126,7 @@ describe("configure page — Generate install link", () => {
     const segment = manifestUrl.slice(BASE.length + 1, -"/manifest.json".length);
 
     expect(decodeConfig(segment)).toEqual({
-      apiKey: "pub_abc123",
+      sources: [{ provider: "newsdata", apiKey: "pub_abc123" }],
       topics: ["world", "technology"],
       language: "en"
     });
@@ -127,7 +134,7 @@ describe("configure page — Generate install link", () => {
 
   test("the install link and the copyable URL describe the same addon", () => {
     const page = loadPage();
-    page.setKey("pub_abc123");
+    page.setKey("newsdata", "pub_abc123");
     page.check("top");
     page.submit();
 
@@ -138,7 +145,7 @@ describe("configure page — Generate install link", () => {
 
   test("carries the chosen language through to the config", () => {
     const page = loadPage();
-    page.setKey("pub_abc123");
+    page.setKey("newsdata", "pub_abc123");
     page.check("top");
     page.document.getElementById("language").value = "fr";
     page.submit();
@@ -150,32 +157,32 @@ describe("configure page — Generate install link", () => {
 
   test("percent-encodes the config into exactly one path segment", () => {
     const page = loadPage();
-    page.setKey("pub abc/123");
+    page.setKey("newsdata", "pub abc/123");
     page.check("top");
     page.submit();
 
     const manifestUrl = page.document.getElementById("manifest-url").value;
     const segment = manifestUrl.slice(BASE.length + 1, -"/manifest.json".length);
     expect(segment).not.toContain("/");
-    expect(decodeConfig(segment).apiKey).toBe("pub abc/123");
+    expect(decodeConfig(segment).sources[0].apiKey).toBe("pub abc/123");
   });
 });
 
 describe("configure page — validation", () => {
-  test("refuses an empty API key and says so", () => {
+  test("refuses when no source has a key, and says so", () => {
     const page = loadPage();
     page.check("technology");
     page.submit();
 
     const error = page.document.getElementById("error");
     expect(error.style.display).toBe("block");
-    expect(error.textContent).toContain("API key");
+    expect(error.textContent).toContain("at least one news source");
     expect(page.document.getElementById("result").className).not.toContain("show");
   });
 
   test("refuses when no topic is selected and says so", () => {
     const page = loadPage();
-    page.setKey("pub_abc123");
+    page.setKey("newsdata", "pub_abc123");
     page.submit();
 
     const error = page.document.getElementById("error");
@@ -186,13 +193,13 @@ describe("configure page — validation", () => {
 
   test("trims surrounding whitespace from the API key", () => {
     const page = loadPage();
-    page.setKey("   pub_abc123   ");
+    page.setKey("newsdata", "   pub_abc123   ");
     page.check("top");
     page.submit();
 
     const manifestUrl = page.document.getElementById("manifest-url").value;
     const segment = manifestUrl.slice(BASE.length + 1, -"/manifest.json".length);
-    expect(decodeConfig(segment).apiKey).toBe("pub_abc123");
+    expect(decodeConfig(segment).sources).toEqual([{ provider: "newsdata", apiKey: "pub_abc123" }]);
   });
 
   test("clears a previous error once the form is valid", () => {
@@ -200,7 +207,7 @@ describe("configure page — validation", () => {
     page.submit();
     expect(page.document.getElementById("error").style.display).toBe("block");
 
-    page.setKey("pub_abc123");
+    page.setKey("newsdata", "pub_abc123");
     page.check("top");
     page.submit();
     expect(page.document.getElementById("error").style.display).toBe("none");
@@ -220,7 +227,7 @@ describe("configure page — topic bulk actions", () => {
   });
 
   test("Clear all unchecks every topic", () => {
-    const page = loadPage({ existing: { apiKey: "k", topics: ["top", "world"], language: "en" } });
+    const page = loadPage({ existing: { sources: [{ provider: "currents", apiKey: "k" }], topics: ["top", "world"], language: "en" } });
     expect(page.checkedTopics().length).toBe(2);
 
     page.document.getElementById("clear-all").dispatchEvent(
@@ -232,7 +239,14 @@ describe("configure page — topic bulk actions", () => {
 
 describe("configure page — re-configuration round trip", () => {
   test("pre-filled settings regenerate the same config when submitted unchanged", () => {
-    const existing = { apiKey: "pub_secret123", topics: ["technology", "business"], language: "fr" };
+    const existing = {
+      sources: [
+        { provider: "newsdata", apiKey: "pub_secret123" },
+        { provider: "currents", apiKey: "cur_abc" }
+      ],
+      topics: ["technology", "business"],
+      language: "fr"
+    };
     const page = loadPage({ existing });
     page.submit();
 
@@ -240,7 +254,7 @@ describe("configure page — re-configuration round trip", () => {
     const segment = manifestUrl.slice(BASE.length + 1, -"/manifest.json".length);
     const decoded = decodeConfig(segment);
 
-    expect(decoded.apiKey).toBe(existing.apiKey);
+    expect(decoded.sources).toEqual(existing.sources);
     expect(decoded.language).toBe(existing.language);
     expect(decoded.topics.sort()).toEqual(["business", "technology"]);
   });
@@ -249,7 +263,7 @@ describe("configure page — re-configuration round trip", () => {
 describe("configure page — copy button", () => {
   test("falls back to selecting the input when the clipboard API is absent", () => {
     const page = loadPage();
-    page.setKey("pub_abc123");
+    page.setKey("newsdata", "pub_abc123");
     page.check("top");
     page.submit();
 
@@ -266,7 +280,7 @@ describe("configure page — copy button", () => {
 
   test("uses the clipboard API when available", async () => {
     const page = loadPage();
-    page.setKey("pub_abc123");
+    page.setKey("newsdata", "pub_abc123");
     page.check("top");
     page.submit();
 
@@ -302,5 +316,129 @@ describe("configure page — script injection safety", () => {
 
     expect(dom.window.PWNED).toBeUndefined();
     expect(errors).toEqual([]);
+  });
+});
+
+describe("configure page — the failover chain", () => {
+  test("a key in any source is enough to generate a link", () => {
+    const page = loadPage();
+    page.setKey("gnews", "gn_key");
+    page.check("technology");
+    page.submit();
+    const url = page.document.getElementById("manifest-url").value;
+    const segment = url.slice(BASE.length + 1, -"/manifest.json".length);
+    expect(decodeConfig(segment).sources).toEqual([{ provider: "gnews", apiKey: "gn_key" }]);
+  });
+
+  test("several keys become an ordered chain, in the order shown on the page", () => {
+    const page = loadPage();
+    page.setKey("currents", "c1");
+    page.setKey("newsdata", "n1");
+    page.setKey("gnews", "g1");
+    page.check("top");
+    page.submit();
+    const url = page.document.getElementById("manifest-url").value;
+    const segment = url.slice(BASE.length + 1, -"/manifest.json".length);
+    expect(decodeConfig(segment).sources.map((s) => s.provider)).toEqual(page.cardOrder());
+  });
+
+  test("moving a source up changes the failover order that is generated", () => {
+    const page = loadPage();
+    page.setKey("currents", "c1");
+    page.setKey("newsdata", "n1");
+    page.check("top");
+
+    expect(page.cardOrder()[0]).toBe("currents");
+    page.click('.source[data-provider="newsdata"] .move-up');
+    expect(page.cardOrder().slice(0, 2)).toEqual(["newsdata", "currents"]);
+
+    page.submit();
+    const url = page.document.getElementById("manifest-url").value;
+    const segment = url.slice(BASE.length + 1, -"/manifest.json".length);
+    expect(decodeConfig(segment).sources.map((s) => s.provider)).toEqual(["newsdata", "currents"]);
+  });
+
+  test("moving a source down changes it too", () => {
+    const page = loadPage();
+    page.setKey("currents", "c1");
+    page.setKey("newsdata", "n1");
+    page.check("top");
+    page.click('.source[data-provider="currents"] .move-down');
+    expect(page.cardOrder().slice(0, 2)).toEqual(["newsdata", "currents"]);
+  });
+
+  test("the first card cannot move up, nor the last down", () => {
+    const page = loadPage();
+    const cards = page.document.querySelectorAll(".source");
+    expect(cards[0].querySelector(".move-up").disabled).toBe(true);
+    expect(cards[cards.length - 1].querySelector(".move-down").disabled).toBe(true);
+  });
+
+  test("a source with no key is skipped entirely", () => {
+    const page = loadPage();
+    page.setKey("currents", "");
+    page.setKey("newsdata", "n1");
+    page.check("top");
+    page.submit();
+    const url = page.document.getElementById("manifest-url").value;
+    const segment = url.slice(BASE.length + 1, -"/manifest.json".length);
+    expect(decodeConfig(segment).sources).toEqual([{ provider: "newsdata", apiKey: "n1" }]);
+  });
+
+  test("keys are trimmed on the way into the URL", () => {
+    const page = loadPage();
+    page.setKey("currents", "   c1   ");
+    page.check("top");
+    page.submit();
+    const url = page.document.getElementById("manifest-url").value;
+    const segment = url.slice(BASE.length + 1, -"/manifest.json".length);
+    expect(decodeConfig(segment).sources[0].apiKey).toBe("c1");
+  });
+
+  // The badge must show the real failover position, not a row number, or a
+  // user with a gap in the list would misread their own priority order.
+  test("rank badges count only the sources that have a key", () => {
+    const page = loadPage();
+    expect(page.ranks()).toEqual(["-", "-", "-"]);
+    page.setKey("newsdata", "n1");
+    expect(page.ranks()).toEqual(["-", "1", "-"]);
+    page.setKey("gnews", "g1");
+    expect(page.ranks()).toEqual(["-", "1", "2"]);
+    page.setKey("currents", "c1");
+    expect(page.ranks()).toEqual(["1", "2", "3"]);
+  });
+
+  test("a filled source is visibly marked as active", () => {
+    const page = loadPage();
+    const card = page.document.querySelector('.source[data-provider="currents"]');
+    expect(card.className).not.toContain("active");
+    page.setKey("currents", "c1");
+    expect(card.className).toContain("active");
+  });
+
+  test("re-configuration shows the saved order back, and regenerates it unchanged", () => {
+    const existing = {
+      sources: [
+        { provider: "gnews", apiKey: "g1" },
+        { provider: "currents", apiKey: "c1" }
+      ],
+      topics: ["top"],
+      language: "en"
+    };
+    const page = loadPage({ existing });
+    expect(page.cardOrder().slice(0, 2)).toEqual(["gnews", "currents"]);
+    page.submit();
+    const url = page.document.getElementById("manifest-url").value;
+    const segment = url.slice(BASE.length + 1, -"/manifest.json".length);
+    expect(decodeConfig(segment).sources).toEqual(existing.sources);
+  });
+
+  test("clicking anywhere that is not a move button does nothing", () => {
+    const page = loadPage();
+    page.setKey("currents", "c1");
+    const before = page.cardOrder();
+    page.click(".source-note");
+    page.click("#sources-list");
+    expect(page.cardOrder()).toEqual(before);
   });
 });
