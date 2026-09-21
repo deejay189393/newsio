@@ -26,8 +26,23 @@ real metadata for every story and a playable stream when the story has video.
   its headline prefixed with a **`▶`**, and its first stream plays that video.
   The marker goes on the title because the title is the only text a catalog grid
   shows under a poster. Every story also offers a "read the article" link.
+- **Configuration is mandatory.** The manifest sets
+  `behaviorHints.configurationRequired`, so Stremio hides *Install* entirely and
+  shows *Configure* instead, pointing at `/configure`. A configuration only
+  counts as complete with **both** an API key and at least one topic -- a URL
+  carrying one but not the other is treated exactly like no configuration at
+  all, rather than installing into a permanently empty state.
 - **Re-configurable.** Stremio's *Configure* button reopens the setup page with
   your current key, language and topics pre-filled.
+
+### Why there is no `config` array
+
+The manifest deliberately omits the SDK's native `config` array. Setting it
+makes the SDK generate its own flat settings form and route the landing page
+to it, which would replace the `/configure` page here (topic checkboxes,
+language picker, install-link builder). `behaviorHints.configurable` plus a
+page served at `/configure` is the documented way to keep a custom
+configuration page.
 
 ### Why the custom `news` type
 
@@ -121,7 +136,7 @@ npm start           # http://localhost:3000/configure
 ```
 
 ```bash
-npm test            # 270 tests
+npm test            # 296 tests
 npm run test:coverage
 ```
 

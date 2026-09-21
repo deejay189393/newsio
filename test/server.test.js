@@ -60,7 +60,7 @@ describe("manifest routes", () => {
     const res = await request(app).get("/manifest.json");
     expect(res.status).toBe(200);
     expect(res.body.id).toBe("org.deejay189393.newsio");
-    expect(res.body.version).toBe("0.2.1");
+    expect(res.body.version).toBe("0.2.2");
     expect(res.body.catalogs).toEqual([]);
     expect(res.body.behaviorHints.configurationRequired).toBe(true);
     expect(res.body.types).toEqual(["news"]);
@@ -72,6 +72,41 @@ describe("manifest routes", () => {
     expect(res.body.catalogs.map((c) => c.name)).toEqual(["Technology", "Finance & Business", "Newsio"]);
     expect(res.body.behaviorHints.configurationRequired).toBe(false);
     expect(res.body.behaviorHints.configurable).toBe(true);
+  });
+
+  test("the bare manifest is not installable: Configure, not Install", async () => {
+    const res = await request(app).get("/manifest.json");
+    expect(res.body.behaviorHints).toEqual({ configurable: true, configurationRequired: true });
+    expect(res.body.catalogs).toEqual([]);
+  });
+
+  // Regression: a URL carrying topics but no API key used to produce an
+  // installable manifest whose catalogs could never return anything.
+  test.each([
+    ["topics but no API key", { topics: ["technology", "business"], language: "en" }],
+    ["topics but an empty API key", { apiKey: "", topics: ["technology"], language: "en" }],
+    ["topics but a whitespace API key", { apiKey: "   ", topics: ["technology"], language: "en" }],
+    ["an API key but no topics", { apiKey: "K", topics: [], language: "en" }],
+    ["an API key but only unknown topics", { apiKey: "K", topics: ["nope"], language: "en" }]
+  ])("a config with %s is still not installable", async (_label, cfg) => {
+    const seg = encodeURIComponent(JSON.stringify(cfg));
+    const res = await request(app).get(`/${seg}/manifest.json`);
+    expect(res.status).toBe(200);
+    expect(res.body.behaviorHints.configurationRequired).toBe(true);
+    expect(res.body.catalogs).toEqual([]);
+  });
+
+  test("a complete config is installable", async () => {
+    const res = await request(app).get(`/${CFG()}/manifest.json`);
+    expect(res.body.behaviorHints.configurationRequired).toBe(false);
+    expect(res.body.catalogs.length).toBeGreaterThan(0);
+  });
+
+  test("an incomplete config can still reach the configure page to finish setup", async () => {
+    const seg = encodeURIComponent(JSON.stringify({ topics: ["technology"], language: "en" }));
+    const res = await request(app).get(`/${seg}/configure`);
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('value="technology" checked');
   });
 
   test("the plain /manifest.json carries the stremio-addons.net credential", async () => {
