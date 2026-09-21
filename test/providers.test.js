@@ -62,6 +62,13 @@ describe("the registry", () => {
     expect(registry.providerSupportsTopic(newsdata, "crime")).toBe(true);
   });
 
+  test("no provider still maps a topic that is no longer offered", () => {
+    const offered = new Set(registry.TOPICS.map((t) => t.id));
+    registry.PROVIDERS.forEach((p) => {
+      Object.keys(p.categories).forEach((id) => expect(offered.has(id)).toBe(true));
+    });
+  });
+
   test("at least one provider can serve every topic offered", () => {
     registry.TOPICS.forEach((t) => {
       expect(registry.PROVIDERS.some((p) => registry.providerSupportsTopic(p, t.id))).toBe(true);

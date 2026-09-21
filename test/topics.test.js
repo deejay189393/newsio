@@ -37,6 +37,21 @@ describe("preset topics", () => {
   test("Video News is offered as a topic of its own", () => {
     expect(PRESET_TOPICS.some((t) => t.id === "video" && t.label === "Video News")).toBe(true);
   });
+
+  // Dropped as a preset: every provider mapped it to its catch-all feed, so
+  // it was a second, vaguer copy of Top Stories rather than a subject.
+  test('"other" is no longer a topic', () => {
+    expect(isPresetTopicId("other")).toBe(false);
+    expect(PRESET_TOPICS.some((t) => t.id === "other")).toBe(false);
+  });
+
+  test("a config still carrying it simply drops it, keeping the rest", () => {
+    expect(normalizeTopics(["top", "other", "technology"]).map((t) => t.id)).toEqual(["top", "technology"]);
+  });
+
+  test('"other" can still be had as a custom topic, if anyone wants it', () => {
+    expect(normalizeTopics([{ q: "other" }]).map((t) => t.id)).toEqual(["q_other"]);
+  });
 });
 
 describe("tidyQuery", () => {

@@ -37,7 +37,6 @@ const CATEGORIES = {
   tourism: "tourism",
   crime: "crime",
   domestic: "domestic",
-  other: "other",
   // Not a category: a filter across all news for stories that carry a
   // playable video. newsdata.io is the only source that has one.
   video: { video: 1 }
