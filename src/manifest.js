@@ -11,7 +11,7 @@ const { TOPICS, getTopicById } = require("./topics");
 const CONTENT_TYPE = "news";
 
 const ADDON_ID = "org.deejay189393.newsio";
-const ADDON_VERSION = "0.2.1";
+const ADDON_VERSION = "0.2.2";
 const CONTACT_EMAIL = "deejay189393@users.noreply.github.com";
 const DESCRIPTION = "News on Stremio? Why not! Uses the newsdata.io API.";
 
@@ -81,12 +81,43 @@ function getStremioAddonsConfig() {
 }
 
 /**
+ * Is this configuration complete enough for the addon to actually work?
+ *
+ * Both halves are load-bearing. Without an API key every catalog request
+ * returns an empty list, and without a topic there are no catalogs to
+ * request at all -- either way the addon installs and then does nothing.
+ * This is what `behaviorHints.configurationRequired` below is driven from,
+ * so a half-filled config is treated exactly like no config.
+ */
+function isConfigured(config) {
+  const hasApiKey = Boolean(config && typeof config.apiKey === "string" && config.apiKey.trim());
+  return hasApiKey && selectedTopics(config).length > 0;
+}
+
+// Guards the shape rather than trusting it: decodeConfig normalizes `topics`
+// to an array before the HTTP routes ever get here, but buildManifest is
+// exported and should not throw on a hand-built object.
+function selectedTopics(config) {
+  const topics = config && config.topics;
+  return Array.isArray(topics) ? topics.map(getTopicById).filter(Boolean) : [];
+}
+
+/**
  * The manifest actually served to Stremio (both the bare, unconfigured one
  * and the per-user configured one).
  *
- * Deliberately has no native `config` array: we want Stremio's "Configure"
- * button to open our own rich HTML page (which `behaviorHints.configurable`
- * does on its own) rather than Stremio's bare-bones generated form.
+ * Configuration is mandatory, which the addon protocol expresses as
+ * `behaviorHints.configurationRequired: true`: Stremio then hides "Install"
+ * entirely and shows "Configure" instead, pointing at /configure on this
+ * host. It is set on the bare manifest and on any incomplete one.
+ *
+ * Deliberately has no native `config` array. The SDK auto-generates a
+ * settings form from that array and makes the landing page use it, which
+ * would replace our own /configure page (topic checkboxes, language picker,
+ * install-link builder) with a flat list of fields. `configurable: true`
+ * plus a page served at /configure is the documented way to keep a custom
+ * configuration page -- see the SDK's advanced.md, "Creating Addon
+ * Configuration Pages".
  */
 function baseManifest(baseUrl) {
   return {
@@ -123,18 +154,19 @@ function getUnconfiguredManifest(baseUrl) {
  * exactly as picked on the configure page.
  */
 function buildManifest(config, baseUrl) {
-  const topics = ((config && config.topics) || []).map(getTopicById).filter(Boolean);
-
-  // The search catalog is only worth advertising alongside real topics: with
-  // nothing configured the addon is not installable anyway.
-  const catalogs = topics.length ? [...topics.map(topicCatalog), searchCatalog()] : [];
+  // An incomplete config is served as if it were no config at all: no
+  // catalogs, and configuration still required. Advertising catalogs for a
+  // config that cannot fetch anything would let the addon install into a
+  // permanently empty state, with nothing in the UI explaining why.
+  const configured = isConfigured(config);
+  const topics = selectedTopics(config);
 
   return {
     ...baseManifest(baseUrl),
-    catalogs,
+    catalogs: configured ? [...topics.map(topicCatalog), searchCatalog()] : [],
     behaviorHints: {
       configurable: true,
-      configurationRequired: topics.length === 0
+      configurationRequired: !configured
     }
   };
 }
@@ -172,6 +204,7 @@ module.exports = {
   getUnconfiguredManifest,
   buildInterfaceManifest,
   getStremioAddonsConfig,
+  isConfigured,
   CONTENT_TYPE,
   ADDON_ID,
   ADDON_VERSION,
