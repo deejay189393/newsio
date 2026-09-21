@@ -12,7 +12,7 @@ const { CATALOG_PAGE_SIZE } = require("./newsdata");
 const CONTENT_TYPE = "news";
 
 const ADDON_ID = "org.deejay189393.newsio";
-const ADDON_VERSION = "0.4.1";
+const ADDON_VERSION = "0.4.2";
 const CONTACT_EMAIL = "deejay189393@users.noreply.github.com";
 const DESCRIPTION = "News on Stremio? Why not! Uses the newsdata.io API.";
 

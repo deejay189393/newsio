@@ -125,7 +125,8 @@ const GENERIC_KEYWORDS = new Set([
 const ACRONYMS = new Set([
   "ai", "ar", "vr", "us", "uk", "eu", "un", "uae", "gdp", "ceo", "cfo", "cto",
   "ipo", "suv", "ev", "nasa", "nfl", "nba", "mlb", "nhl", "ipl", "fifa", "uefa",
-  "gps", "api", "tv", "pc"
+  "gps", "api", "tv", "pc", "isp", "nsfw", "pdf", "cpu", "gpu", "usb", "sms",
+  "url", "vpn", "ssd", "led", "hd", "ui", "ux", "faq", "diy"
 ]);
 
 // A tag, not a sentence: newsdata.io keywords occasionally run to a whole

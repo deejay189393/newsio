@@ -178,6 +178,11 @@ which is filtered:
 | The publisher's own name | `dailymail` on a Mail Online story |
 | Whole clauses | `sixth edition of mangaluru technovanza -2026` |
 
+Publisher text also arrives HTML-escaped — a real tag row rendered
+`Telco &amp; Isp` — so titles, descriptions and keywords are entity-decoded
+once at the API boundary. Everything downstream is JSON for Stremio rather
+than markup, so the rest of the addon only ever sees real characters.
+
 A family is only treated as a CMS taxonomy when two or more keywords share a
 hyphen segment, so a lone `sci-fi` survives as the real tag it is.
 
@@ -253,7 +258,7 @@ npm start           # http://localhost:3000/configure
 ```
 
 ```bash
-npm test            # 432 tests
+npm test            # 458 tests
 npm run test:coverage
 ```
 

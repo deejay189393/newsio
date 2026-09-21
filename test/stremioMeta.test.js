@@ -422,7 +422,11 @@ describe("buildGenres — the detail page tag row", () => {
       ["us", "US"],
       ["nasa", "NASA"],
       ["fifa", "FIFA"],
-      ["ev", "EV"]
+      ["ev", "EV"],
+      ["isp", "ISP"],
+      ["nsfw", "NSFW"],
+      ["pdf", "PDF"],
+      ["gpu", "GPU"]
     ])("the initialism %p renders as %p", (raw, shown) => {
       expect(g({ categories: [], keywords: [raw] })).toEqual([shown]);
     });
@@ -461,6 +465,12 @@ describe("buildGenres — the detail page tag row", () => {
           expect(word[0]).toBe(word[0].toUpperCase());
         });
       });
+    });
+
+    test("an entity-escaped keyword renders as real characters", () => {
+      // Seen live: "Telco &amp; Isp".
+      const article = { categories: [], keywords: ["telco & isp"] };
+      expect(g(article)).toEqual(["Telco & ISP"]);
     });
 
     test("category labels keep their own punctuation and casing", () => {

@@ -83,8 +83,40 @@ function isLowQuality(article) {
   return COMMERCE_PHRASES.some((pattern) => pattern.test(text));
 }
 
+/**
+ * Publishers hand newsdata.io HTML-escaped text and it is passed through
+ * verbatim, so a keyword arrives as "telco &amp; isp" and renders with the
+ * entity showing. Everything downstream is JSON for Stremio rather than
+ * markup, so the text is decoded once, at the boundary, and the rest of the
+ * addon only ever sees real characters.
+ */
+const NAMED_ENTITIES = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " "
+};
+
+function decodeEntities(text) {
+  return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, entity) => {
+    if (entity[0] === "#") {
+      const code =
+        entity[1].toLowerCase() === "x" ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1), 10);
+      // Reject anything outside Unicode, and the surrogate range, which
+      // String.fromCodePoint throws on.
+      if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff) return match;
+      if (code >= 0xd800 && code <= 0xdfff) return match;
+      return String.fromCodePoint(code);
+    }
+    const named = NAMED_ENTITIES[entity.toLowerCase()];
+    return named === undefined ? match : named;
+  });
+}
+
 function realText(value) {
-  const text = typeof value === "string" ? value.trim() : "";
+  const text = typeof value === "string" ? decodeEntities(value).trim() : "";
   return !text || PAID_PLAN_PLACEHOLDER.test(text) ? "" : text;
 }
 
@@ -120,7 +152,9 @@ function normalizeArticle(raw) {
     category: Array.isArray(raw.category) ? raw.category[0] : raw.category || null,
     // The full list, not just the first: the first is usually "top".
     categories: Array.isArray(raw.category) ? raw.category.filter((c) => typeof c === "string") : [],
-    keywords: Array.isArray(raw.keywords) ? raw.keywords.filter((k) => typeof k === "string") : [],
+    keywords: Array.isArray(raw.keywords)
+      ? raw.keywords.map((k) => (typeof k === "string" ? decodeEntities(k) : k)).filter((k) => typeof k === "string")
+      : [],
     creator: Array.isArray(raw.creator) ? raw.creator.join(", ") : realText(raw.creator) || null
   };
 }
@@ -329,6 +363,7 @@ module.exports = {
   normalizeArticle,
   makeArticleId,
   realText,
+  decodeEntities,
   isLowQuality,
   LOW_QUALITY_SOURCE_PRIORITY,
   UPSTREAM_PAGE_SIZE,
