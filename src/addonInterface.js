@@ -5,6 +5,7 @@ const { normalizeTopics, isPresetTopicId } = require("./topics");
 const { fetchCatalogPage, getArticle } = require("./sources");
 const { normalizeSources } = require("./config");
 const { toMetaPreview, toFullMeta, toStreams } = require("./stremioMeta");
+const { currentBaseUrl } = require("./requestContext");
 
 /**
  * Wires the catalog/meta/stream logic into the official stremio-addon-sdk
@@ -83,7 +84,7 @@ function createAddonInterface() {
   builder.defineStreamHandler(async ({ id, config }) => {
     const article = await getArticle(safeSources(config), id);
     if (!article) return { streams: [] };
-    return { streams: toStreams(article), cacheMaxAge: 3600 };
+    return { streams: toStreams(article, { baseUrl: currentBaseUrl() }), cacheMaxAge: 3600 };
   });
 
   return builder.getInterface();
