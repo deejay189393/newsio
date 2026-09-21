@@ -177,6 +177,7 @@ which is filtered:
 | Site navigation | `home page 3`, `yahoo feed` |
 | The publisher's own name | `dailymail` on a Mail Online story |
 | Whole clauses | `sixth edition of mangaluru technovanza -2026` |
+| Publisher CMS fields | `Locale: US`, `Sponsored: False`, `Content-Type: News` |
 
 Publisher text also arrives HTML-escaped — a real tag row rendered
 `Telco &amp; Isp` — so titles, descriptions and keywords are entity-decoded
@@ -258,7 +259,7 @@ npm start           # http://localhost:3000/configure
 ```
 
 ```bash
-npm test            # 458 tests
+npm test            # 473 tests
 npm run test:coverage
 ```
 
