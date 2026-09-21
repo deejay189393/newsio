@@ -241,7 +241,7 @@ function renderConfigurePage({ baseUrl, existing }) {
         <button type="button" id="add-custom">+ Add</button>
       </div>
       <div class="hint">
-        A custom topic is a saved search — "FIFA World Cup", "Arsenal", "semiconductor exports".
+        A custom topic is a saved search — "FIFA World Cup", "Arsenal FC", "semiconductor exports".
         Up to ${MAX_CUSTOM_TOPICS} of them. Search is also available as its own catalog covering
         everything, and every catalog pages 20 stories at a time. Not every source carries
         every topic — Newsio simply skips a source that cannot serve one.

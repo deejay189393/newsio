@@ -69,7 +69,14 @@ describe("renderConfigurePage — first-time configuration", () => {
   // should read as an ordinary interest rather than a loaded one.
   test("suggests a neutral example, in both the placeholder and the hint", () => {
     expect(html).toContain('placeholder="FIFA World Cup"');
-    expect(html).toContain('"FIFA World Cup", "Arsenal", "semiconductor exports"');
+    expect(html).toContain('"FIFA World Cup", "Arsenal FC", "semiconductor exports"');
+  });
+
+  // "Arsenal" alone ranks stock-market stories about Ameresco above football
+  // on at least one provider; the disambiguated form searches far better.
+  test("suggests the disambiguated club name, not the bare word", () => {
+    expect(html).toContain("Arsenal FC");
+    expect(html).not.toMatch(/"Arsenal"/);
   });
 
   test("suggests nothing with a negative connotation", () => {
