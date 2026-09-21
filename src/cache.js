@@ -76,10 +76,20 @@ const catalogCache = new TTLCache(10 * 60 * 1000, 500); // 10 minutes
 const articleCache = new TTLCache(60 * 60 * 1000, 5000); // 1 hour
 const pageCursorCache = new TTLCache(60 * 60 * 1000, 500); // 1 hour
 
+/**
+ * Sources that have just failed. A rate-limited key stays limited for a
+ * while, so re-asking it on every request would spend the whole catalog
+ * load discovering the same failure and delay every page by one dead round
+ * trip. A short cooldown makes the next source the effective primary until
+ * the limit clears.
+ */
+const sourceCooldownCache = new TTLCache(10 * 60 * 1000, 100); // 10 minutes
+
 function clearAllCaches() {
   catalogCache.clear();
   articleCache.clear();
   pageCursorCache.clear();
+  sourceCooldownCache.clear();
 }
 
-module.exports = { TTLCache, catalogCache, articleCache, pageCursorCache, clearAllCaches };
+module.exports = { TTLCache, catalogCache, articleCache, pageCursorCache, sourceCooldownCache, clearAllCaches };

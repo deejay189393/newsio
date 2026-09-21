@@ -1,7 +1,8 @@
 const request = require("supertest");
 const { clearAllCaches } = require("../src/cache");
 const { encodeConfig } = require("../src/config");
-const { CATALOG_PAGE_SIZE, UPSTREAM_PAGE_SIZE } = require("../src/newsdata");
+const { CATALOG_PAGE_SIZE } = require("../src/articles");
+const UPSTREAM_PAGE_SIZE = require("../src/providers/newsdata").UPSTREAM_PAGE_SIZE;
 
 let app;
 beforeEach(() => {
@@ -18,7 +19,8 @@ const article = (id, extra = {}) => ({
   link: `https://example.com/${id}`,
   ...extra
 });
-const CFG = () => encodeConfig({ apiKey: "TEST_KEY", topics: ["technology", "business"], language: "en" });
+const SRC = [{ provider: "newsdata", apiKey: "TEST_KEY" }];
+const CFG = () => encodeConfig({ sources: SRC, topics: ["technology", "business"], language: "en" });
 
 describe("basic routes", () => {
   test("GET / redirects to the configure page", async () => {
@@ -60,7 +62,7 @@ describe("manifest routes", () => {
     const res = await request(app).get("/manifest.json");
     expect(res.status).toBe(200);
     expect(res.body.id).toBe("org.deejay189393.newsio");
-    expect(res.body.version).toBe("0.4.3");
+    expect(res.body.version).toBe("0.5.0");
     expect(res.body.catalogs).toEqual([]);
     expect(res.body.behaviorHints.configurationRequired).toBe(true);
     expect(res.body.types).toEqual(["news"]);
@@ -83,11 +85,11 @@ describe("manifest routes", () => {
   // Regression: a URL carrying topics but no API key used to produce an
   // installable manifest whose catalogs could never return anything.
   test.each([
-    ["topics but no API key", { topics: ["technology", "business"], language: "en" }],
-    ["topics but an empty API key", { apiKey: "", topics: ["technology"], language: "en" }],
-    ["topics but a whitespace API key", { apiKey: "   ", topics: ["technology"], language: "en" }],
-    ["an API key but no topics", { apiKey: "K", topics: [], language: "en" }],
-    ["an API key but only unknown topics", { apiKey: "K", topics: ["nope"], language: "en" }]
+    ["topics but no sources", { topics: ["technology", "business"], language: "en" }],
+    ["topics but an empty source list", { sources: [], topics: ["technology"], language: "en" }],
+    ["topics but a whitespace-only key", { sources: [{ provider: "newsdata", apiKey: "   " }], topics: ["technology"], language: "en" }],
+    ["a source but no topics", { sources: [{ provider: "newsdata", apiKey: "K" }], topics: [], language: "en" }],
+    ["a source but only unknown topics", { sources: [{ provider: "newsdata", apiKey: "K" }], topics: ["nope"], language: "en" }]
   ])("a config with %s is still not installable", async (_label, cfg) => {
     const seg = encodeURIComponent(JSON.stringify(cfg));
     const res = await request(app).get(`/${seg}/manifest.json`);
@@ -121,14 +123,14 @@ describe("manifest routes", () => {
 
   test("the served manifest carries the new short description", async () => {
     const res = await request(app).get(`/${CFG()}/manifest.json`);
-    expect(res.body.description).toBe("News on Stremio? Why not! Uses the newsdata.io API.");
+    expect(res.body.description).toBe("News on Stremio? Why not! Reads live headlines from newsdata.io, Currents and GNews.");
   });
 
   // Regression: search used to be declared on every topic catalog, so one
   // query produced an identical result row per selected topic.
   test("only the search catalog advertises search, whatever the user picked", async () => {
     const many = encodeConfig({
-      apiKey: "K",
+      sources: SRC,
       topics: ["top", "technology", "science", "health", "sports"],
       language: "en"
     });
@@ -179,7 +181,7 @@ describe("configure / re-configure routes", () => {
 
   test("the generated install URL round-trips back into a valid manifest", async () => {
     // Reproduce exactly what the page's client-side code builds.
-    const segment = encodeURIComponent(JSON.stringify({ apiKey: "K", topics: ["sports"], language: "de" }));
+    const segment = encodeURIComponent(JSON.stringify({ sources: [{ provider: "newsdata", apiKey: "K" }], topics: ["sports"], language: "de" }));
     const res = await request(app).get(`/${segment}/manifest.json`);
     expect(res.status).toBe(200);
     expect(res.body.catalogs.map((c) => c.name)).toEqual(["Sports", "Newsio"]);
@@ -283,7 +285,7 @@ describe("catalog route", () => {
   });
 
   test("returns empty metas when the stored config has no API key", async () => {
-    const cfg = encodeConfig({ apiKey: "", topics: ["technology"], language: "en" });
+    const cfg = encodeConfig({ sources: [], topics: ["technology"], language: "en" });
     const res = await request(app).get(`/${cfg}/catalog/news/technology.json`);
     expect(res.status).toBe(200);
     expect(res.body.metas).toEqual([]);
@@ -406,7 +408,7 @@ describe("end-to-end user journey", () => {
     expect((await request(app).get("/configure")).status).toBe(200);
 
     // 2. the page builds this install URL from their choices
-    const cfg = encodeConfig({ apiKey: "K", topics: ["technology"], language: "en" });
+    const cfg = encodeConfig({ sources: [{ provider: "newsdata", apiKey: "K" }], topics: ["technology"], language: "en" });
     const manifest = await request(app).get(`/${cfg}/manifest.json`);
     expect(manifest.body.catalogs[0].name).toBe("Technology");
     expect(manifest.body.catalogs.at(-1).name).toBe("Newsio");

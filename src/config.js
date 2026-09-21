@@ -1,34 +1,58 @@
-const { isValidTopicId, VALID_LANGUAGE_CODES } = require("./topics");
+const { isValidTopicId, isValidProviderId, VALID_LANGUAGE_CODES, PROVIDERS } = require("./providers");
 
 /**
  * User configuration is carried in the URL as the first path segment,
  * exactly the way stremio-addon-sdk's own getRouter expects it: a JSON
- * object, percent-encoded as a single path segment, i.e.
+ * object, percent-encoded as a single path segment.
  *
- *     encodeURIComponent(JSON.stringify({ apiKey, topics, language }))
- *     -> /%7B%22apiKey%22...%7D/manifest.json
+ *     encodeURIComponent(JSON.stringify({ sources, topics, language }))
  *
- * Using the SDK's native convention (rather than a bespoke base64 scheme)
- * means the SDK router decodes and JSON.parses the segment for us on the
- * catalog/meta/stream routes and hands each handler a real `config` object.
+ * `sources` is an ordered list of { provider, apiKey } -- the order is the
+ * failover order, so the first one that answers serves the request.
  *
- * Nothing is persisted server-side: the user's key lives only inside their
+ * Nothing is persisted server-side: the user's keys live only inside their
  * own personal addon URL.
  */
 function encodeConfig(config) {
-  const json = JSON.stringify({
-    apiKey: config.apiKey || "",
-    topics: Array.isArray(config.topics) ? config.topics : [],
-    language: config.language || "en"
-  });
-  return encodeURIComponent(json);
+  return encodeURIComponent(JSON.stringify(normalizeConfig(config)));
+}
+
+function normalizeConfig(config) {
+  return {
+    sources: normalizeSources(config && config.sources),
+    topics: Array.isArray(config && config.topics) ? config.topics.filter(isValidTopicId) : [],
+    language: validLanguage(config && config.language)
+  };
+}
+
+/**
+ * Keeps the user's ordering, drops anything unusable, and allows each
+ * provider only once -- two keys for the same API would fail over into the
+ * same quota.
+ */
+function normalizeSources(sources) {
+  if (!Array.isArray(sources)) return [];
+  const seen = new Set();
+  const normalized = [];
+  for (const entry of sources) {
+    if (!entry || typeof entry !== "object") continue;
+    const provider = entry.provider;
+    const apiKey = typeof entry.apiKey === "string" ? entry.apiKey.trim() : "";
+    if (!isValidProviderId(provider) || !apiKey || seen.has(provider)) continue;
+    seen.add(provider);
+    normalized.push({ provider, apiKey });
+  }
+  return normalized;
+}
+
+function validLanguage(language) {
+  return typeof language === "string" && VALID_LANGUAGE_CODES.has(language) ? language : "en";
 }
 
 /**
  * Decode a config path segment into a validated object, or null if it is
  * missing / not JSON / not our shape. Accepts the segment either still
- * percent-encoded or already decoded (Express decodes route params for us),
- * so the same helper works from both the HTTP layer and tests.
+ * percent-encoded or already decoded (Express decodes route params for us).
  */
 function decodeConfig(raw) {
   if (!raw) return null;
@@ -41,15 +65,7 @@ function decodeConfig(raw) {
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
 
-  const topics = Array.isArray(parsed.topics) ? parsed.topics.filter(isValidTopicId) : [];
-  const language =
-    typeof parsed.language === "string" && VALID_LANGUAGE_CODES.has(parsed.language) ? parsed.language : "en";
-
-  return {
-    apiKey: typeof parsed.apiKey === "string" ? parsed.apiKey.trim() : "",
-    topics,
-    language
-  };
+  return normalizeConfig(parsed);
 }
 
 function maybeDecode(raw) {
@@ -61,4 +77,23 @@ function maybeDecode(raw) {
   }
 }
 
-module.exports = { encodeConfig, decodeConfig };
+/**
+ * Is this configuration complete enough for the addon to work?
+ *
+ * Both halves are load-bearing. Without a source there is nothing to fetch
+ * from, and without a topic there are no catalogs to fetch -- either way the
+ * addon would install and then do nothing.
+ */
+function isConfigured(config) {
+  const sources = normalizeSources(config && config.sources);
+  const topics = Array.isArray(config && config.topics) ? config.topics.filter(isValidTopicId) : [];
+  return sources.length > 0 && topics.length > 0;
+}
+
+/** The providers a config does not already use, for the configure page. */
+function unusedProviders(config) {
+  const used = new Set(normalizeSources(config && config.sources).map((s) => s.provider));
+  return PROVIDERS.filter((p) => !used.has(p.id));
+}
+
+module.exports = { encodeConfig, decodeConfig, normalizeSources, isConfigured, unusedProviders };

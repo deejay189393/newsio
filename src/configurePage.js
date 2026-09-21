@@ -1,4 +1,4 @@
-const { TOPICS, LANGUAGES } = require("./topics");
+const { TOPICS, LANGUAGES, PROVIDERS } = require("./providers");
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({
@@ -28,18 +28,56 @@ function jsonForScript(value) {
 }
 
 /**
+ * Order the provider cards the way the user last saved them, with any they
+ * have not configured following behind. Re-configuration has to show the
+ * failover order back, since the order *is* the setting.
+ */
+function orderedProviders(existing) {
+  const saved = ((existing && existing.sources) || [])
+    .map((s) => PROVIDERS.find((p) => p.id === s.provider))
+    .filter(Boolean);
+  const rest = PROVIDERS.filter((p) => !saved.includes(p));
+  return [...saved, ...rest];
+}
+
+/**
  * The addon's own configuration page.
  *
  * Also used as the RE-configuration page: Stremio's "Configure" button on
  * an installed addon opens /<config>/configure, and passing the decoded
- * `existing` config here pre-fills the key, language and topic checkboxes
- * so the user edits their current setup rather than starting over.
+ * `existing` config here pre-fills the keys, their order, the language and
+ * the topic checkboxes so the user edits their current setup rather than
+ * starting over.
  */
 function renderConfigurePage({ baseUrl, existing }) {
-  const apiKey = (existing && existing.apiKey) || "";
   const selectedTopics = new Set((existing && existing.topics) || []);
   const language = (existing && existing.language) || "en";
   const isReconfigure = Boolean(existing);
+  const savedKeys = new Map(((existing && existing.sources) || []).map((s) => [s.provider, s.apiKey]));
+
+  const sourceCards = orderedProviders(existing)
+    .map((provider) => {
+      const key = savedKeys.get(provider.id) || "";
+      return `
+      <div class="source" data-provider="${escapeHtml(provider.id)}">
+        <div class="source-head">
+          <div class="source-rank" aria-hidden="true"></div>
+          <div class="source-name">
+            ${escapeHtml(provider.label)}
+            ${provider.delayed ? '<span class="chip warn">12h delay</span>' : ""}
+            ${provider.supportsVideo ? '<span class="chip">video</span>' : ""}
+          </div>
+          <div class="source-move">
+            <button type="button" class="move-up" title="Try this source earlier" aria-label="Move ${escapeHtml(provider.label)} earlier">&#9650;</button>
+            <button type="button" class="move-down" title="Try this source later" aria-label="Move ${escapeHtml(provider.label)} later">&#9660;</button>
+          </div>
+        </div>
+        <p class="source-note">${escapeHtml(provider.notes)}</p>
+        <input type="password" class="source-key" placeholder="${escapeHtml(provider.keyPlaceholder)}" value="${escapeHtml(key)}" aria-label="${escapeHtml(provider.label)} API key" />
+        <div class="source-links"><a href="${escapeHtml(provider.signupUrl)}" target="_blank" rel="noopener">Get a free ${escapeHtml(provider.label)} key</a></div>
+      </div>`;
+    })
+    .join("");
 
   const topicCheckboxes = TOPICS.map((t) => {
     const checked = selectedTopics.has(t.id) ? " checked" : "";
@@ -83,7 +121,8 @@ function renderConfigurePage({ baseUrl, existing }) {
     border-radius: 10px; padding: 10px 12px; font-size: 13px; margin-bottom: 18px;
   }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 18px; }
-  .card h2 { font-size: 15px; margin: 0 0 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .card h2 { font-size: 15px; margin: 0 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .card .lead { font-size: 13px; color: var(--muted); margin: 0 0 14px; line-height: 1.5; }
   label.field { display: block; margin-bottom: 14px; }
   label.field span.label-text { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
   input[type="password"], input[type="text"], select {
@@ -91,6 +130,30 @@ function renderConfigurePage({ baseUrl, existing }) {
     padding: 11px 12px; border-radius: 9px; font-size: 15px;
   }
   input:focus, select:focus { outline: 2px solid var(--accent-2); }
+  .source { background: #0d0f14; border: 1px solid var(--border); border-radius: 11px; padding: 14px; margin-bottom: 10px; }
+  .source.active { border-color: var(--accent); }
+  .source-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .source-rank {
+    flex: 0 0 auto; width: 22px; height: 22px; border-radius: 6px; background: var(--border);
+    color: var(--text); font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  }
+  .source.active .source-rank { background: var(--accent); }
+  .source-name { flex: 1 1 auto; font-size: 15px; font-weight: 600; }
+  .chip {
+    display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+    padding: 2px 6px; border-radius: 5px; background: rgba(108,92,231,.25); color: var(--accent-2); margin-left: 6px;
+    vertical-align: middle;
+  }
+  .chip.warn { background: rgba(255,176,32,.18); color: #ffb020; }
+  .source-move { flex: 0 0 auto; display: flex; gap: 4px; }
+  .source-move button {
+    width: 28px; height: 28px; padding: 0; font-size: 11px; background: #171a21; border: 1px solid var(--border);
+    color: var(--muted); border-radius: 7px; cursor: pointer;
+  }
+  .source-move button:disabled { opacity: .3; cursor: default; }
+  .source-note { font-size: 12px; color: var(--muted); margin: 0 0 10px; line-height: 1.5; }
+  .source-links { margin-top: 8px; font-size: 12px; }
+  .source-links a { color: var(--accent-2); }
   .topics-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   @media (max-width: 420px) { .topics-grid { grid-template-columns: 1fr; } }
   label.topic {
@@ -128,19 +191,22 @@ function renderConfigurePage({ baseUrl, existing }) {
   <header>
     <img src="/logo.png" alt="Newsio" />
     <h1>Newsio</h1>
-    <p>News on Stremio? Why not! Uses the newsdata.io API.</p>
+    <p>News on Stremio? Why not! Reads live headlines from newsdata.io, Currents and GNews.</p>
   </header>
 
-  ${isReconfigure ? '<div class="banner">Editing your current setup — your existing key and topics are pre-filled. Generate a new link and install it to apply changes.</div>' : ""}
+  ${isReconfigure ? '<div class="banner">Editing your current setup — your keys, their order and your topics are pre-filled. Generate a new link and install it to apply changes.</div>' : ""}
 
   <form id="config-form">
     <div class="card">
-      <h2>API Key</h2>
-      <label class="field">
-        <span class="label-text">newsdata.io API key</span>
-        <input type="password" id="apiKey" name="apiKey" placeholder="pub_xxxxxxxxxxxxxxxxxxxx" value="${escapeHtml(apiKey)}" required />
-      </label>
-      <div class="hint">Get a free key at <a href="https://newsdata.io/register" target="_blank" rel="noopener">newsdata.io/register</a>. It is stored only inside your personal addon URL — never on this server.</div>
+      <h2>News sources</h2>
+      <p class="lead">
+        Add a key for at least one. Add more than one and they become a failover chain:
+        Newsio tries them <strong>top to bottom</strong> and moves to the next whenever one
+        is rate-limited or down, so a spent free tier leaves your catalogs full instead of empty.
+        Use the arrows to set the order. Leave a key blank to skip that source.
+      </p>
+      <div id="sources-list">${sourceCards}</div>
+      <div class="hint">Every key is free to obtain, and is stored only inside your personal addon URL — never on this server.</div>
     </div>
 
     <div class="card">
@@ -158,7 +224,7 @@ function renderConfigurePage({ baseUrl, existing }) {
         <button type="button" id="clear-all">Clear all</button>
       </div>
       <div class="topics-grid">${topicCheckboxes}</div>
-      <div class="hint">Pick at least one. Every catalog supports search and infinite scroll inside Stremio.</div>
+      <div class="hint">Pick at least one. Search is a single catalog covering every topic, and every catalog pages 20 stories at a time. Not every source carries every topic — Newsio simply skips a source that cannot serve one.</div>
     </div>
 
     <button type="submit" id="submit-btn">Generate install link</button>
@@ -192,6 +258,42 @@ function renderConfigurePage({ baseUrl, existing }) {
   var installLink = document.getElementById("install-link");
   var manifestUrlInput = document.getElementById("manifest-url");
   var copyBtn = document.getElementById("copy-btn");
+  var sourcesList = document.getElementById("sources-list");
+
+  function sourceCards() {
+    return Array.prototype.slice.call(sourcesList.querySelectorAll(".source"));
+  }
+
+  // The rank badge only counts sources that actually have a key, so the
+  // number shown is the real failover position rather than a row number.
+  function refreshRanks() {
+    var cards = sourceCards();
+    var rank = 0;
+    cards.forEach(function (card, index) {
+      var filled = card.querySelector(".source-key").value.trim().length > 0;
+      if (filled) rank++;
+      card.className = filled ? "source active" : "source";
+      card.querySelector(".source-rank").textContent = filled ? String(rank) : "-";
+      card.querySelector(".move-up").disabled = index === 0;
+      card.querySelector(".move-down").disabled = index === cards.length - 1;
+    });
+  }
+
+  sourcesList.addEventListener("click", function (e) {
+    var button = e.target.closest ? e.target.closest("button") : null;
+    if (!button) return;
+    var card = button.closest(".source");
+    if (!card) return;
+    if (button.className.indexOf("move-up") !== -1 && card.previousElementSibling) {
+      sourcesList.insertBefore(card, card.previousElementSibling);
+      refreshRanks();
+    } else if (button.className.indexOf("move-down") !== -1 && card.nextElementSibling) {
+      sourcesList.insertBefore(card.nextElementSibling, card);
+      refreshRanks();
+    }
+  });
+
+  sourcesList.addEventListener("input", refreshRanks);
 
   document.getElementById("select-all").addEventListener("click", function () {
     form.querySelectorAll('input[name="topics"]').forEach(function (el) { el.checked = true; });
@@ -204,14 +306,20 @@ function renderConfigurePage({ baseUrl, existing }) {
     e.preventDefault();
     errorEl.style.display = "none";
 
-    var apiKey = document.getElementById("apiKey").value.trim();
+    // DOM order is failover order.
+    var sources = [];
+    sourceCards().forEach(function (card) {
+      var apiKey = card.querySelector(".source-key").value.trim();
+      if (apiKey) sources.push({ provider: card.getAttribute("data-provider"), apiKey: apiKey });
+    });
+
     var language = document.getElementById("language").value;
     var topics = Array.prototype.slice
       .call(form.querySelectorAll('input[name="topics"]:checked'))
       .map(function (el) { return el.value; });
 
-    if (!apiKey) {
-      errorEl.textContent = "Please enter your newsdata.io API key.";
+    if (sources.length === 0) {
+      errorEl.textContent = "Please enter an API key for at least one news source.";
       errorEl.style.display = "block";
       return;
     }
@@ -223,7 +331,7 @@ function renderConfigurePage({ baseUrl, existing }) {
 
     // Matches stremio-addon-sdk's own config convention exactly:
     // one path segment of encodeURIComponent(JSON.stringify(config)).
-    var configSegment = encodeURIComponent(JSON.stringify({ apiKey: apiKey, topics: topics, language: language }));
+    var configSegment = encodeURIComponent(JSON.stringify({ sources: sources, topics: topics, language: language }));
     var base = BASE_URL;
     while (base.length && base.charAt(base.length - 1) === "/") base = base.slice(0, -1);
     var httpUrl = base + "/" + configSegment + "/manifest.json";
@@ -246,9 +354,11 @@ function renderConfigurePage({ baseUrl, existing }) {
       manifestUrlInput.select();
     }
   });
+
+  refreshRanks();
 </script>
 </body>
 </html>`;
 }
 
-module.exports = { renderConfigurePage, escapeHtml, jsonForScript };
+module.exports = { renderConfigurePage, escapeHtml, jsonForScript, orderedProviders };

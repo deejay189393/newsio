@@ -1,5 +1,5 @@
 const { CONTENT_TYPE } = require("./manifest");
-const { getTopicLabel } = require("./topics");
+const { getTopicLabel } = require("./providers");
 const { FALLBACK_POSTER, FALLBACK_BACKGROUND } = require("./fallbackImages");
 
 /**
