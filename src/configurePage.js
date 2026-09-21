@@ -11,6 +11,23 @@ function escapeHtml(str) {
 }
 
 /**
+ * Embed a value as a JavaScript literal inside an inline <script>.
+ *
+ * JSON.stringify on its own is not enough. The HTML parser ends a script at
+ * the first literal "</script>" no matter how the JS quoting looks, so a
+ * value containing that sequence breaks out and injects markup -- and
+ * baseUrl is built from the request's Host header. Escaping "<" closes that,
+ * and escaping U+2028/U+2029 covers the two characters that are line
+ * terminators to JavaScript but legal raw inside a JSON string.
+ */
+function jsonForScript(value) {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
+/**
  * The addon's own configuration page.
  *
  * Also used as the RE-configuration page: Stremio's "Configure" button on
@@ -161,7 +178,13 @@ function renderConfigurePage({ baseUrl, existing }) {
 </div>
 
 <script>
-  var BASE_URL = ${JSON.stringify(baseUrl)};
+  // NOTE: this script lives inside a JS template literal (see the enclosing
+  // backticks), which consumes backslash escapes before the browser ever
+  // sees them. A regex literal written here arrives mangled and kills the
+  // whole script at parse time -- which silently disables every control on
+  // this page. Keep this block backslash-free; use string methods instead.
+  // test/configurePage.dom.test.js executes this script and enforces that.
+  var BASE_URL = ${jsonForScript(baseUrl)};
 
   var form = document.getElementById("config-form");
   var errorEl = document.getElementById("error");
@@ -201,13 +224,16 @@ function renderConfigurePage({ baseUrl, existing }) {
     // Matches stremio-addon-sdk's own config convention exactly:
     // one path segment of encodeURIComponent(JSON.stringify(config)).
     var configSegment = encodeURIComponent(JSON.stringify({ apiKey: apiKey, topics: topics, language: language }));
-    var httpUrl = BASE_URL.replace(/\/$/, "") + "/" + configSegment + "/manifest.json";
-    var stremioUrl = httpUrl.replace(/^https?:\/\//, "stremio://");
+    var base = BASE_URL;
+    while (base.length && base.charAt(base.length - 1) === "/") base = base.slice(0, -1);
+    var httpUrl = base + "/" + configSegment + "/manifest.json";
+    var schemeEnd = httpUrl.indexOf("://");
+    var stremioUrl = schemeEnd === -1 ? httpUrl : "stremio://" + httpUrl.slice(schemeEnd + 3);
 
     installLink.href = stremioUrl;
     manifestUrlInput.value = httpUrl;
     resultEl.classList.add("show");
-    resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (resultEl.scrollIntoView) resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 
   copyBtn.addEventListener("click", function () {
@@ -225,4 +251,4 @@ function renderConfigurePage({ baseUrl, existing }) {
 </html>`;
 }
 
-module.exports = { renderConfigurePage, escapeHtml };
+module.exports = { renderConfigurePage, escapeHtml, jsonForScript };
