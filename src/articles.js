@@ -93,6 +93,12 @@ const COMMERCE_PHRASES = [
 ];
 
 function isLowQuality(article) {
+  // A provider may have already judged the item while it had detail the
+  // shared rules never see -- YouTube knows a video's spoken language, view
+  // count and whether it is embeddable at all. Marking rather than dropping
+  // is deliberate: it keeps the upstream page its full size, which the
+  // slice arithmetic below depends on.
+  if (article.excluded) return true;
   if (typeof article.sourcePriority === "number" && article.sourcePriority > LOW_QUALITY_SOURCE_PRIORITY) {
     return true;
   }

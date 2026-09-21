@@ -14,12 +14,12 @@ beforeEach(() => {
 });
 
 describe("manifest basics", () => {
-  test("version is 0.6.4", () => {
-    expect(M.ADDON_VERSION).toBe("0.6.4");
+  test("version is 0.7.0", () => {
+    expect(M.ADDON_VERSION).toBe("0.7.0");
   });
 
   test("uses the short addon description", () => {
-    expect(M.DESCRIPTION).toBe("News on Stremio? Why not! Reads live headlines from newsdata.io, Currents and GNews.");
+    expect(M.DESCRIPTION).toBe("News on Stremio? Why not! Reads live headlines from newsdata.io, Currents, YouTube and GNews.");
     expect(M.getUnconfiguredManifest(BASE_URL).description).toBe(M.DESCRIPTION);
   });
 
@@ -31,7 +31,7 @@ describe("manifest basics", () => {
   test("declares one id prefix per provider, so every id we mint routes to us", () => {
     const { PROVIDERS } = require("../src/providers");
     expect(M.getUnconfiguredManifest(BASE_URL).idPrefixes).toEqual(PROVIDERS.map((p) => p.idPrefix));
-    expect(M.getUnconfiguredManifest(BASE_URL).idPrefixes).toEqual(["cu_", "nd_", "gn_"]);
+    expect(M.getUnconfiguredManifest(BASE_URL).idPrefixes).toEqual(["cu_", "nd_", "yt_", "gn_"]);
   });
 
   test("declares catalog, meta and stream resources", () => {

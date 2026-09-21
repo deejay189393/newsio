@@ -185,26 +185,28 @@ describe("renderConfigurePage — re-configuration", () => {
 describe("orderedProviders — the saved failover order is shown back", () => {
   test("saved sources come first, in their order", () => {
     const existing = { sources: [{ provider: "gnews", apiKey: "g" }, { provider: "newsdata", apiKey: "n" }] };
-    expect(orderedProviders(existing).map((p) => p.id)).toEqual(["gnews", "newsdata", "currents"]);
+    expect(orderedProviders(existing).map((p) => p.id)).toEqual(["gnews", "newsdata", "currents", "youtube"]);
   });
 
   test("unconfigured providers follow, in the default order", () => {
     expect(orderedProviders({ sources: [{ provider: "newsdata", apiKey: "n" }] }).map((p) => p.id)).toEqual([
       "newsdata",
       "currents",
+      "youtube",
       "gnews"
     ]);
   });
 
   test("with nothing saved the default order stands", () => {
-    expect(orderedProviders(null).map((p) => p.id)).toEqual(["currents", "newsdata", "gnews"]);
-    expect(orderedProviders({}).map((p) => p.id)).toEqual(["currents", "newsdata", "gnews"]);
+    expect(orderedProviders(null).map((p) => p.id)).toEqual(["currents", "newsdata", "youtube", "gnews"]);
+    expect(orderedProviders({}).map((p) => p.id)).toEqual(["currents", "newsdata", "youtube", "gnews"]);
   });
 
   test("an unknown saved provider is ignored rather than crashing the page", () => {
     expect(orderedProviders({ sources: [{ provider: "nope", apiKey: "x" }] }).map((p) => p.id)).toEqual([
       "currents",
       "newsdata",
+      "youtube",
       "gnews"
     ]);
   });
@@ -213,6 +215,6 @@ describe("orderedProviders — the saved failover order is shown back", () => {
     const existing = { sources: [{ provider: "gnews", apiKey: "g" }], topics: [], language: "en" };
     const markup = renderConfigurePage({ baseUrl: BASE, existing });
     const order = [...markup.matchAll(/data-provider="([a-z]+)"/g)].map((m) => m[1]);
-    expect(order).toEqual(["gnews", "currents", "newsdata"]);
+    expect(order).toEqual(["gnews", "currents", "newsdata", "youtube"]);
   });
 });

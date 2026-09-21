@@ -62,7 +62,7 @@ describe("manifest routes", () => {
     const res = await request(app).get("/manifest.json");
     expect(res.status).toBe(200);
     expect(res.body.id).toBe("org.deejay189393.newsio");
-    expect(res.body.version).toBe("0.6.4");
+    expect(res.body.version).toBe("0.7.0");
     expect(res.body.catalogs).toEqual([]);
     expect(res.body.behaviorHints.configurationRequired).toBe(true);
     expect(res.body.types).toEqual(["news"]);
@@ -123,7 +123,7 @@ describe("manifest routes", () => {
 
   test("the served manifest carries the new short description", async () => {
     const res = await request(app).get(`/${CFG()}/manifest.json`);
-    expect(res.body.description).toBe("News on Stremio? Why not! Reads live headlines from newsdata.io, Currents and GNews.");
+    expect(res.body.description).toBe("News on Stremio? Why not! Reads live headlines from newsdata.io, Currents, YouTube and GNews.");
   });
 
   // Regression: search used to be declared on every topic catalog, so one

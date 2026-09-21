@@ -15,7 +15,7 @@ const fail = (status, body) => ({ ok: false, status, json: async () => body });
 
 describe("the registry", () => {
   test("offers the providers freshest-first", () => {
-    expect(registry.PROVIDERS.map((p) => p.id)).toEqual(["currents", "newsdata", "gnews"]);
+    expect(registry.PROVIDERS.map((p) => p.id)).toEqual(["currents", "newsdata", "youtube", "gnews"]);
   });
 
   test("every provider satisfies the same interface", () => {
@@ -39,6 +39,7 @@ describe("the registry", () => {
   test.each([
     ["cu_abc", "currents"],
     ["nd_abc", "newsdata"],
+    ["yt_abc", "youtube"],
     ["gn_abc", "gnews"]
   ])("%p routes back to %p", (id, provider) => {
     expect(registry.providerForArticleId(id).id).toBe(provider);

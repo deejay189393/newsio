@@ -586,3 +586,129 @@ describe("buildFullDescription", () => {
     expect(buildFullDescription({ description: long })).toBe(long);
   });
 });
+
+describe("dates arrive in four shapes, one per source", () => {
+  // Regression: this used to append "Z" unconditionally after swapping the
+  // first space for a "T", so everything already carrying a zone became
+  // "...:42ZZ" and silently lost its date. Only newsdata.io's zone-less form
+  // ever worked, which is why no test caught it.
+  test.each([
+    ["newsdata.io", "2026-09-21 17:55:42", "2026-09-21"],
+    ["Currents", "2026-09-21 19:14:32 +0000", "2026-09-21"],
+    ["GNews", "2026-09-21T17:55:42Z", "2026-09-21"],
+    ["YouTube", "2026-09-21T17:55:42Z", "2026-09-21"],
+    ["with milliseconds", "2026-09-21T17:55:42.000Z", "2026-09-21"],
+    ["with a colon offset", "2026-09-21T17:55:42+05:30", "2026-09-21"]
+  ])("%s: %p reads as %p", (_label, raw, expected) => {
+    expect(formatReleaseInfo(raw)).toBe(expected);
+  });
+
+  test("an offset is respected rather than assumed to be UTC", () => {
+    // 17:55 at -07:00 is the next day in UTC.
+    expect(formatReleaseInfo("2026-09-21 17:55:42 -0700")).toBe("2026-09-22");
+  });
+
+  test("nothing parseable means no date at all, never \"Invalid Date\"", () => {
+    expect(formatReleaseInfo("nonsense")).toBeUndefined();
+    expect(formatReleaseInfo("")).toBeUndefined();
+    expect(formatReleaseInfo(null)).toBeUndefined();
+  });
+});
+
+describe("SEO tag families collapse to one tag", () => {
+  const genres = (keywords, sourceName = "Example News") =>
+    buildGenres({ keywords, categories: [], sourceName });
+
+  test("fifteen rewordings of one story become one or two tags", () => {
+    // Verbatim from a live DNAIndiaNews video.
+    const tags = genres([
+      "iit bombay student suicide father statement",
+      "iit bombay student death father",
+      "iit bombay student suicide case",
+      "iit bombay student death",
+      "iit bombay news",
+      "iit bombay student death news",
+      "iit bombay latest news"
+    ]);
+    expect(tags.length).toBeLessThanOrEqual(2);
+    tags.forEach((tag) => expect(tag).toMatch(/^Iit Bombay/));
+  });
+
+  test("genuinely different subjects all survive", () => {
+    // Each pair shares only "news", which is under the threshold. ("World
+    // News" is deliberately not used here -- it is a generic keyword and is
+    // dropped a step earlier, for unrelated reasons.)
+    expect(genres(["AI News", "Business News", "Tech News", "Climate News"])).toEqual([
+      "AI News",
+      "Business News",
+      "Tech News",
+      "Climate News"
+    ]);
+  });
+
+  test("tags sharing no words at all are never merged", () => {
+    expect(genres(["Space Rocket", "Ocean Shipping"])).toEqual(["Space Rocket", "Ocean Shipping"]);
+  });
+
+  test("one-word tags are exempt, since they overlap fully on their only word", () => {
+    expect(genres(["Radio", "Visual Radio"])).toEqual(["Radio", "Visual Radio"]);
+  });
+
+  test("hashtags are channel branding, not subjects", () => {
+    expect(genres(["#LiveFarmington", "Wildfire Response"])).toEqual(["Wildfire Response"]);
+  });
+
+  test("a tag that merely contains the publisher's name is still the publisher", () => {
+    // "Reuters Youtube" is the channel advertising itself, not a subject.
+    expect(genres(["Reuters Youtube", "Markets Today"], "Reuters")).toEqual(["Markets Today"]);
+    expect(genres(["Fox News Channel", "Media"], "Fox News")).toEqual(["Media"]);
+  });
+
+  test("a short publisher id cannot swallow half the vocabulary", () => {
+    // Guarded on length: "ET" must not strip "Budget" or "Market".
+    expect(genres(["Budget 2026", "Market Rally"], "ET")).toEqual(["Budget 2026", "Market Rally"]);
+  });
+
+  test("broadcaster initialisms render as initialisms", () => {
+    expect(genres(["gma", "usa", "fnc"], "Nobody")).toEqual(["GMA", "USA", "FNC"]);
+  });
+});
+
+describe("a YouTube story offers both ways to watch it", () => {
+  const ytArticle = {
+    id: "yt_dQw4w9WgXcQ",
+    title: "Reuters headlines",
+    description: "Today's bulletin.",
+    link: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    pubDate: "2026-09-21T17:55:42Z",
+    sourceName: "Reuters",
+    duration: "9 min",
+    keywords: [],
+    categories: [],
+    provider: "youtube"
+  };
+
+  test("ytId first, then the watch page, so a client plays whichever it can", () => {
+    // Not a fallback: both are listed at once, because `ytId` needs a
+    // built-in YouTube player and not every Stremio-compatible client has
+    // one. The client shows whichever it understands.
+    const streams = toStreams(ytArticle);
+    expect(streams).toHaveLength(2);
+    expect(streams[0].ytId).toBe("dQw4w9WgXcQ");
+    expect(streams[0].url).toBeUndefined();
+    expect(streams[1].externalUrl).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+    expect(streams[1].title).toBe("Watch on YouTube (Reuters)");
+  });
+
+  test("a wire story still says \"read\", because that is what it is", () => {
+    expect(toStreams({ ...ytArticle, provider: "newsdata", videoUrl: null })[0].title).toBe(
+      "Read on Reuters"
+    );
+  });
+
+  test("only a video source fills in a runtime", () => {
+    expect(toFullMeta(ytArticle).runtime).toBe("9 min");
+    expect(toFullMeta({ ...ytArticle, duration: null }).runtime).toBeUndefined();
+  });
+});
