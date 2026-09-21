@@ -9,6 +9,7 @@ const {
   buildGenres,
   isCmsField,
   toVideoStream,
+  youtubeIdOf,
   isPlayableVideo,
   VIDEO_MARKER
 } = require("../src/stremioMeta");
@@ -689,16 +690,34 @@ describe("a YouTube story offers both ways to watch it", () => {
     provider: "youtube"
   };
 
-  test("ytId first, then the watch page, so a client plays whichever it can", () => {
-    // Not a fallback: both are listed at once, because `ytId` needs a
-    // built-in YouTube player and not every Stremio-compatible client has
-    // one. The client shows whichever it understands.
+  test("one stream, pointing at this addon's own /yt endpoint", () => {
+    // Both of the previous rows were dead in Nuvio: it resolves a stream
+    // through `url` and `externalUrl` only, so the `ytId` row did nothing
+    // at all when tapped, and the `externalUrl` row left the player for
+    // the YouTube app. A real media URL is the only thing that plays.
+    const streams = toStreams(ytArticle, { baseUrl: "https://newsio.up.railway.app" });
+    expect(streams).toHaveLength(1);
+    expect(streams[0].url).toBe("https://newsio.up.railway.app/yt/dQw4w9WgXcQ.mp4");
+    expect(streams[0].ytId).toBeUndefined();
+    expect(streams[0].externalUrl).toBeUndefined();
+    expect(streams[0].title).toBe("Play video (Reuters)");
+  });
+
+  test("the URL follows the host being served, so beta never points at production", () => {
+    const beta = toStreams(ytArticle, { baseUrl: "https://newsio-beta.up.railway.app" });
+    expect(beta[0].url).toBe("https://newsio-beta.up.railway.app/yt/dQw4w9WgXcQ.mp4");
+  });
+
+  test("without a known host it falls back rather than emitting a relative URL", () => {
+    // A relative URL would be unplayable; the old pair is at least honest.
     const streams = toStreams(ytArticle);
-    expect(streams).toHaveLength(2);
-    expect(streams[0].ytId).toBe("dQw4w9WgXcQ");
-    expect(streams[0].url).toBeUndefined();
-    expect(streams[1].externalUrl).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
-    expect(streams[1].title).toBe("Watch on YouTube (Reuters)");
+    expect(streams.some((s) => s.ytId === "dQw4w9WgXcQ")).toBe(true);
+  });
+
+  test("the id is read from the watch URL", () => {
+    expect(youtubeIdOf(ytArticle)).toBe("dQw4w9WgXcQ");
+    expect(youtubeIdOf({ link: "https://example.com/story" })).toBeNull();
+    expect(youtubeIdOf({})).toBeNull();
   });
 
   test("a wire story still says \"read\", because that is what it is", () => {

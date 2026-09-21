@@ -393,6 +393,12 @@ const YOUTUBE_ID = /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|v\/)|
  * how HLS playlists and plain-http files still play instead of failing
  * silently.
  */
+/** The video id behind a YouTube story, or null if this is not one. */
+function youtubeIdOf(article) {
+  const match = YOUTUBE_ID.exec(article.videoUrl || article.link || "");
+  return match ? match[1] : null;
+}
+
 /** Will Stremio's own player open this story's video? */
 function isPlayableVideo(article) {
   const stream = toVideoStream(article);
@@ -430,8 +436,30 @@ function toVideoStream(article) {
  * A playable video comes first when there is one. The article link is
  * always offered too, as an externalUrl, so reading the full story is one
  * tap away whether or not a video exists.
+ *
+ * YouTube is the exception, and gets exactly one stream. `ytId` looked like
+ * the right answer -- it is what the protocol documents, and it is what an
+ * earlier version shipped -- but Nuvio reads only `url` and `externalUrl`
+ * when resolving a stream, so a `ytId` row rendered in the list and did
+ * nothing when tapped, while the `externalUrl` row bounced out to the
+ * YouTube app. Neither played anything in the player. So the video is
+ * served through this addon's own /yt endpoint, which hands back a real
+ * MP4, and the two dead rows are gone.
  */
-function toStreams(article) {
+function toStreams(article, { baseUrl } = {}) {
+  const youtubeId = article.provider === "youtube" && baseUrl ? youtubeIdOf(article) : null;
+  if (youtubeId) {
+    return [
+      {
+        name: "Newsio",
+        title: `Play video (${article.sourceName})`,
+        description: `Play video (${article.sourceName})`,
+        url: `${baseUrl}/yt/${youtubeId}.mp4`,
+        behaviorHints: { videoSize: undefined, filename: `${youtubeId}.mp4` }
+      }
+    ];
+  }
+
   const streams = [];
 
   const video = toVideoStream(article);
@@ -462,6 +490,7 @@ module.exports = {
   toFullMeta,
   toStreams,
   toVideoStream,
+  youtubeIdOf,
   isPlayableVideo,
   formatReleaseInfo,
   buildDescription,

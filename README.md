@@ -229,12 +229,38 @@ The ▶ marker still only appears where playback will really work: a story whose
 `video_url` is an embed page rather than a media file is left unmarked, because
 Stremio can only hand that to a browser.
 
-**A YouTube story offers two streams at once**, and that is deliberate rather
-than a fallback. The addon protocol's `ytId` "plays using the built-in YouTube
-player", which official Stremio has and not every Stremio-compatible client
-does. So the video is listed both as a `ytId` stream and as an `externalUrl` to
-the watch page, and the client shows whichever it understands. If inline
-playback works you get it; if it does not, the link is already there.
+**A YouTube story gets exactly one stream, and it is a real MP4** served by
+this addon at `/yt/<videoId>.mp4`.
+
+The obvious answer was `ytId`, which the protocol documents as playing "using
+the built-in YouTube player", and that is what an earlier version shipped
+alongside an `externalUrl` fallback. Both rows were dead in Nuvio. Reading its
+source settles why: `Stream.kt` parses `ytId` and even defines
+`isYouTube()`, but that helper is called from nowhere, and `getStreamUrl()`
+resolves a stream through `url` and `externalUrl` only. So the `ytId` row
+rendered in the list and did nothing when selected, while the `externalUrl` row
+left the player for the YouTube app. Nuvio *can* play YouTube — its trailers
+do — but that runs through `InAppYouTubeExtractor`, which the addon stream path
+never reaches.
+
+So Newsio resolves the video itself, the same way that extractor does: ask
+YouTube's InnerTube player endpoint as the Android client, which is the only
+one still returning a *progressive* format (itag 18, H.264 360p with the audio
+muxed in). Every higher quality YouTube offers is adaptive — video and audio as
+separate files — which a single stream URL cannot express. The watch page is
+scraped first for an InnerTube key and visitor id; without them the API starts
+answering `LOGIN_REQUIRED` within minutes from a datacenter IP.
+
+**The bytes are proxied, not redirected to.** That is forced rather than
+chosen: the media URL YouTube returns is signed over the IP that requested it
+(`ip` appears in the URL's own `sparams` list), so a URL resolved on the server
+and handed to a television is refused on arrival. Range requests pass through
+in both directions, so seeking works. The cost is bandwidth — 360p news clips,
+so tens of megabytes each.
+
+Two things to know about this. It is 360p, because that is the only muxed
+format YouTube still offers. And it depends on an undocumented internal API,
+so it is the part of this addon most likely to break without warning.
 
 ## Failover
 
