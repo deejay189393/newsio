@@ -636,3 +636,64 @@ describe("configure page — catalog order", () => {
     ]);
   });
 });
+
+describe("revealing an API key", () => {
+  const toggleFor = (page, provider) =>
+    page.document.querySelector(`.source[data-provider="${provider}"] .key-toggle`);
+  const fieldFor = (page, provider) =>
+    page.document.querySelector(`.source[data-provider="${provider}"] .source-key`);
+
+  test("clicking reveals the key, clicking again hides it", () => {
+    const page = loadPage();
+    page.setKey("youtube", "AIzaSECRET");
+    const field = fieldFor(page, "youtube");
+    const toggle = toggleFor(page, "youtube");
+
+    expect(field.type).toBe("password");
+    toggle.click();
+    expect(field.type).toBe("text");
+    expect(field.value).toBe("AIzaSECRET"); // readable, so it can be copied
+    toggle.click();
+    expect(field.type).toBe("password");
+  });
+
+  test("the button reports its state, which is also what swaps the icon", () => {
+    // The open and struck-through glyphs both ship in the markup; CSS picks
+    // one off aria-pressed, so the icon can never drift from the field.
+    const page = loadPage();
+    const toggle = toggleFor(page, "youtube");
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(toggle.getAttribute("title")).toBe("Show key");
+    expect(toggle.querySelector(".eye-open")).not.toBeNull();
+    expect(toggle.querySelector(".eye-shut")).not.toBeNull();
+
+    toggle.click();
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(toggle.getAttribute("title")).toBe("Hide key");
+  });
+
+  test("each source's toggle only affects its own field", () => {
+    const page = loadPage();
+    toggleFor(page, "youtube").click();
+    expect(fieldFor(page, "youtube").type).toBe("text");
+    expect(fieldFor(page, "currents").type).toBe("password");
+    expect(fieldFor(page, "newsdata").type).toBe("password");
+  });
+
+  test("revealing a key does not disturb what gets generated", () => {
+    const page = loadPage();
+    page.setKey("newsdata", "pub_abc");
+    toggleFor(page, "newsdata").click();
+    page.check("top");
+    page.submit();
+    const url = page.document.getElementById("manifest-url").value;
+    const segment = url.slice(BASE.length + 1, -"/manifest.json".length);
+    expect(decodeConfig(segment).sources).toEqual([{ provider: "newsdata", apiKey: "pub_abc" }]);
+  });
+
+  test("the page still loads without script errors", () => {
+    const page = loadPage();
+    toggleFor(page, "youtube").click();
+    expect(page.errors).toEqual([]);
+  });
+});
