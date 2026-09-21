@@ -19,7 +19,7 @@ const CONTENT_TYPE = "news";
 const ID_PREFIXES = PROVIDERS.map((p) => p.idPrefix);
 
 const ADDON_ID = "org.deejay189393.newsio";
-const ADDON_VERSION = "0.5.0";
+const ADDON_VERSION = "0.5.1";
 const CONTACT_EMAIL = "deejay189393@users.noreply.github.com";
 const DESCRIPTION = "News on Stremio? Why not! Reads live headlines from newsdata.io, Currents and GNews.";
 

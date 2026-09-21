@@ -18,7 +18,7 @@ the next, so your catalogs stay full instead of going empty.
 |---|---|---|---|---|
 | [Currents](https://currentsapi.services) | **minutes** | 20 (a whole page, 1 credit) | no | 16 of 17 |
 | [newsdata.io](https://newsdata.io) | minutes | 10 (a page costs 2 credits) | **yes** | 17 of 17 |
-| [GNews](https://gnews.io) | **12 hours behind** on the free plan | 10 (a page costs 2 credits) | no | 11 of 17 |
+| [GNews](https://gnews.io) | **12 hours behind** on the free plan | 10 (a page costs 2 credits, spaced 1.5s apart) | no | 11 of 17 |
 
 Measured, not quoted from the docs: sampled against all three at the same
 moment, the newest article Currents offered was **6 minutes old** and the
@@ -32,6 +32,13 @@ why the configure page labels it. Stale news beats an empty shelf.
 
 Only newsdata.io carries video, so the ▶ marker only ever appears on stories it
 served.
+
+GNews also refuses two requests issued back to back — measured: the second of a
+pair sent with no gap is refused outright, while the same pair a second apart
+both succeed. A 20-article page is two of its responses, so Newsio spaces them
+1.5 seconds apart. Without that it could not serve a full page at all. The
+delay only costs anything when GNews is actually being used, which is when
+every fresher source is already spent.
 
 ---
 
@@ -333,7 +340,7 @@ npm start           # http://localhost:3000/configure
 ```
 
 ```bash
-npm test            # 600 tests
+npm test            # 607 tests
 npm run test:coverage
 ```
 

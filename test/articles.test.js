@@ -242,6 +242,54 @@ describe("assembleCatalogPage — skip is an absolute item offset", () => {
 
   // Filtering after the slice keeps each page mapped to a fixed span of
   // upstream results; filtering first would make pages drift and overlap.
+  describe("spacing requests for an API that rejects bursts", () => {
+    test("waits between pages, but not before the first", async () => {
+      const p = pager(10, 200);
+      const delay = jest.fn().mockResolvedValue(undefined);
+      await assembleCatalogPage({
+        skip: 0,
+        upstreamPageSize: 10,
+        loadPage: p.loadPage,
+        interPageDelayMs: 1500,
+        delay
+      });
+      expect(delay).toHaveBeenCalledTimes(1); // two pages, one gap
+      expect(delay).toHaveBeenCalledWith(1500);
+    });
+
+    test("waits before every page after the first", async () => {
+      const p = pager(5, 200); // 20 items needs four pages
+      const delay = jest.fn().mockResolvedValue(undefined);
+      await assembleCatalogPage({
+        skip: 0,
+        upstreamPageSize: 5,
+        loadPage: p.loadPage,
+        interPageDelayMs: 10,
+        delay
+      });
+      expect(delay).toHaveBeenCalledTimes(3);
+    });
+
+    test("does not wait at all when the provider asks for no gap", async () => {
+      const p = pager(10, 200);
+      const delay = jest.fn().mockResolvedValue(undefined);
+      await assembleCatalogPage({ skip: 0, upstreamPageSize: 10, loadPage: p.loadPage, delay });
+      expect(delay).not.toHaveBeenCalled();
+    });
+
+    test("the gap is skipped once the feed has ended", async () => {
+      const delay = jest.fn().mockResolvedValue(undefined);
+      await assembleCatalogPage({
+        skip: 0,
+        upstreamPageSize: 10,
+        loadPage: async () => ({ articles: [], hasMore: false }),
+        interPageDelayMs: 1500,
+        delay
+      });
+      expect(delay).not.toHaveBeenCalled();
+    });
+  });
+
   test("filtering low quality never makes two pages overlap", async () => {
     const loadPage = async (index) => ({
       articles: Array.from({ length: 10 }, (_, k) => ({

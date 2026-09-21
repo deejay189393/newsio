@@ -489,6 +489,10 @@ describe("currents provider", () => {
 });
 
 describe("gnews provider", () => {
+  // GNews refuses back-to-back requests, so fetchPage spaces them. Tests
+  // must not actually sit through that gap.
+  const noSleep = () => Promise.resolve();
+
   const arts = (start, n) =>
     ok({
       totalArticles: 100,
@@ -504,7 +508,7 @@ describe("gnews provider", () => {
 
   test("assembles a 20-item page from two 10-item responses", async () => {
     global.fetch = jest.fn().mockResolvedValueOnce(arts(0, 10)).mockResolvedValueOnce(arts(10, 10));
-    const res = await gnews.fetchPage({ apiKey: "K", topic: "technology", language: "en", skip: 0 });
+    const res = await gnews.fetchPage({ apiKey: "K", topic: "technology", language: "en", skip: 0, delay: noSleep });
     expect(res.articles).toHaveLength(20);
     expect(res.articles[0].id).toBe("gn_g0");
   });
@@ -606,6 +610,26 @@ describe("gnews provider", () => {
     expect(n.videoUrl).toBeNull();
     expect(n.provider).toBe("gnews");
     expect(gnews.normalize({ id: "x" }).sourceName).toBe("Unknown source");
+  });
+
+  // Measured: the second of a pair sent with no gap is refused, while the
+  // same pair a second apart both succeed. Without spacing them GNews could
+  // never serve a full 20-article page.
+  test("spaces its two requests, so a full page is reachable at all", async () => {
+    global.fetch = jest.fn().mockResolvedValueOnce(arts(0, 10)).mockResolvedValueOnce(arts(10, 10));
+    const delay = jest.fn().mockResolvedValue(undefined);
+    const res = await gnews.fetchPage({ apiKey: "K", topic: "technology", language: "en", skip: 0, delay });
+    expect(res.articles).toHaveLength(20);
+    expect(delay).toHaveBeenCalledWith(gnews.INTER_PAGE_DELAY_MS);
+  });
+
+  test("the gap has margin over the measured threshold", () => {
+    expect(gnews.INTER_PAGE_DELAY_MS).toBeGreaterThanOrEqual(1000);
+  });
+
+  test("the fresher providers need no gap at all", () => {
+    expect(newsdata.INTER_PAGE_DELAY_MS).toBeUndefined();
+    expect(currents.INTER_PAGE_DELAY_MS).toBeUndefined();
   });
 
   test("is flagged as delayed, so the configure page can warn about it", () => {

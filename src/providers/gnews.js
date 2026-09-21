@@ -7,6 +7,17 @@ const ID_PREFIX = "gn_";
 /** GNews caps a free-tier response at 10 regardless of `max`. */
 const UPSTREAM_PAGE_SIZE = 10;
 
+/**
+ * GNews blocks two requests issued back to back -- measured: the second of a
+ * pair sent with no gap is refused ("blocked because you made too many
+ * requests in a short period"), while the same pair a second apart both
+ * succeed. A 20-article page is two of its responses, so without spacing
+ * them it could never serve a full page. 1.5s buys margin over the measured
+ * threshold; it only costs anything when GNews is actually being used, which
+ * is when every fresher source is already spent.
+ */
+const INTER_PAGE_DELAY_MS = 1500;
+
 /** Canonical topic id -> the value GNews wants in `category`. */
 const CATEGORIES = {
   top: "general",
@@ -83,7 +94,7 @@ async function call(path, params) {
 
 const key = (queryKey, i) => `gnews::${queryKey}::${i}`;
 
-async function fetchPage({ apiKey, topic, query, language, skip }) {
+async function fetchPage({ apiKey, topic, query, language, skip, delay }) {
   if (!apiKey) {
     const err = new Error("Missing GNews API key");
     err.status = 401;
@@ -114,7 +125,13 @@ async function fetchPage({ apiKey, topic, query, language, skip }) {
     return page;
   };
 
-  return assembleCatalogPage({ skip, upstreamPageSize: UPSTREAM_PAGE_SIZE, loadPage });
+  return assembleCatalogPage({
+    skip,
+    upstreamPageSize: UPSTREAM_PAGE_SIZE,
+    loadPage,
+    interPageDelayMs: INTER_PAGE_DELAY_MS,
+    ...(delay ? { delay } : {})
+  });
 }
 
 /** GNews exposes no single-article endpoint. */
@@ -139,5 +156,6 @@ module.exports = {
   getArticleById,
   normalize,
   UPSTREAM_PAGE_SIZE,
+  INTER_PAGE_DELAY_MS,
   CATALOG_PAGE_SIZE
 };
