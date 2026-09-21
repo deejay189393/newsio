@@ -6,18 +6,30 @@ const ND = { provider: "newsdata", apiKey: "nd-key" };
 describe("encode / decode round trip", () => {
   test("a normal config survives intact", () => {
     const cfg = { sources: [CUR, ND], topics: ["technology", "top"], language: "fr" };
-    expect(decodeConfig(encodeConfig(cfg))).toEqual(cfg);
+    expect(decodeConfig(encodeConfig(cfg))).toEqual({
+      sources: [CUR, ND],
+      topics: [
+        { kind: "preset", id: "technology", label: "Technology" },
+        { kind: "preset", id: "top", label: "Top Stories" }
+      ],
+      language: "fr"
+    });
   });
 
   test("survives Express having already decoded the route param", () => {
-    const cfg = { sources: [CUR], topics: ["top"], language: "en" };
-    const encoded = encodeConfig(cfg);
-    expect(decodeConfig(decodeURIComponent(encoded))).toEqual(cfg);
+    const encoded = encodeConfig({ sources: [CUR], topics: ["top"], language: "en" });
+    expect(decodeConfig(decodeURIComponent(encoded))).toEqual(decodeConfig(encoded));
   });
 
-  test("survives non-ASCII in a key", () => {
-    const cfg = { sources: [{ provider: "currents", apiKey: "clé-éñ-日本" }], topics: ["top"], language: "en" };
-    expect(decodeConfig(encodeConfig(cfg))).toEqual(cfg);
+  test("survives non-ASCII in a key and in a custom topic", () => {
+    const cfg = {
+      sources: [{ provider: "currents", apiKey: "clé-éñ-日本" }],
+      topics: [{ q: "café culture" }],
+      language: "en"
+    };
+    const back = decodeConfig(encodeConfig(cfg));
+    expect(back.sources[0].apiKey).toBe("clé-éñ-日本");
+    expect(back.topics[0].query).toBe("café culture");
   });
 
   test("the config is a single path segment", () => {
@@ -27,7 +39,7 @@ describe("encode / decode round trip", () => {
   test("survives a literal % that is not a valid escape", () => {
     expect(decodeConfig('{"sources":[{"provider":"currents","apiKey":"100%"}],"topics":["top"]}')).toEqual({
       sources: [{ provider: "currents", apiKey: "100%" }],
-      topics: ["top"],
+      topics: [{ kind: "preset", id: "top", label: "Top Stories" }],
       language: "en"
     });
   });
@@ -92,10 +104,9 @@ describe("normalizeSources — the failover chain", () => {
 
 describe("topics and language validation", () => {
   test("unknown topics are dropped, known ones kept in order", () => {
-    expect(decodeConfig(JSON.stringify({ topics: ["nope", "technology", "bogus", "top"] })).topics).toEqual([
-      "technology",
-      "top"
-    ]);
+    expect(
+      decodeConfig(JSON.stringify({ topics: ["nope", "technology", "bogus", "top"] })).topics.map((t) => t.id)
+    ).toEqual(["technology", "top"]);
   });
 
   test.each([["en"], ["fr"], ["ja"]])("keeps the supported language %p", (language) => {
@@ -123,6 +134,11 @@ describe("isConfigured", () => {
 
   test("a topic that normalizes away does not count", () => {
     expect(isConfigured({ sources: [CUR], topics: ["nope"] })).toBe(false);
+    expect(isConfigured({ sources: [CUR], topics: [{ q: "!!!" }] })).toBe(false);
+  });
+
+  test("a custom topic alone is enough", () => {
+    expect(isConfigured({ sources: [CUR], topics: [{ q: "London crime" }] })).toBe(true);
   });
 });
 

@@ -36,7 +36,8 @@ const CATEGORIES = {
   tourism: null,
   crime: null,
   domestic: "nation",
-  other: "general"
+  other: "general",
+  video: null // no video field in this API at all
 };
 
 const LANGUAGES = ["en", "de", "fr", "es", "it", "pt", "nl", "ru", "zh", "ar", "hi", "ja", "ko"];

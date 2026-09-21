@@ -1,4 +1,5 @@
-const { TOPICS, LANGUAGES, PROVIDERS } = require("./providers");
+const { LANGUAGES, PROVIDERS } = require("./providers");
+const { PRESET_TOPICS, normalizeTopics, MAX_CUSTOM_TOPICS, MAX_QUERY_LENGTH } = require("./topics");
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({
@@ -50,7 +51,7 @@ function orderedProviders(existing) {
  * starting over.
  */
 function renderConfigurePage({ baseUrl, existing }) {
-  const selectedTopics = new Set((existing && existing.topics) || []);
+  const selectedTopics = normalizeTopics((existing && existing.topics) || []);
   const language = (existing && existing.language) || "en";
   const isReconfigure = Boolean(existing);
   const savedKeys = new Map(((existing && existing.sources) || []).map((s) => [s.provider, s.apiKey]));
@@ -78,15 +79,6 @@ function renderConfigurePage({ baseUrl, existing }) {
       </div>`;
     })
     .join("");
-
-  const topicCheckboxes = TOPICS.map((t) => {
-    const checked = selectedTopics.has(t.id) ? " checked" : "";
-    return `
-      <label class="topic">
-        <input type="checkbox" name="topics" value="${t.id}"${checked} />
-        <span>${escapeHtml(t.label)}</span>
-      </label>`;
-  }).join("");
 
   const languageOptions = LANGUAGES.map((l) => {
     const selected = l.code === language ? " selected" : "";
@@ -154,18 +146,34 @@ function renderConfigurePage({ baseUrl, existing }) {
   .source-note { font-size: 12px; color: var(--muted); margin: 0 0 10px; line-height: 1.5; }
   .source-links { margin-top: 8px; font-size: 12px; }
   .source-links a { color: var(--accent-2); }
-  .topics-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  @media (max-width: 420px) { .topics-grid { grid-template-columns: 1fr; } }
-  label.topic {
+  #topic-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
+  .topic-row {
     display: flex; align-items: center; gap: 10px; background: #0d0f14; border: 1px solid var(--border);
-    border-radius: 9px; padding: 10px 12px; font-size: 14px; cursor: pointer;
+    border-radius: 9px; padding: 9px 10px; font-size: 14px;
   }
-  label.topic input { width: 17px; height: 17px; accent-color: var(--accent); }
-  .topic-actions { display: flex; gap: 8px; margin-bottom: 10px; }
-  .topic-actions button {
-    width: auto; flex: 0 0 auto; background: #0d0f14; border: 1px solid var(--border);
-    color: var(--muted); padding: 6px 12px; font-size: 12px; font-weight: 500; border-radius: 8px;
+  .topic-rank {
+    flex: 0 0 auto; width: 22px; height: 22px; border-radius: 6px; background: var(--accent);
+    color: #fff; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center;
   }
+  .topic-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topic-row .btns { flex: 0 0 auto; display: flex; gap: 4px; }
+  .topic-row .btns button {
+    width: 28px; height: 28px; padding: 0; font-size: 11px; background: #171a21; border: 1px solid var(--border);
+    color: var(--muted); border-radius: 7px; cursor: pointer;
+  }
+  .topic-row .btns button:disabled { opacity: .3; cursor: default; }
+  .topic-row .btns button.remove { color: #ff6b6b; }
+  .topic-empty { color: var(--muted); font-size: 13px; padding: 12px 2px; }
+  .preset-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  .preset-chips button {
+    width: auto; background: #0d0f14; border: 1px solid var(--border); color: var(--text);
+    padding: 7px 11px; font-size: 13px; font-weight: 500; border-radius: 999px; cursor: pointer;
+  }
+  .preset-chips button:hover { border-color: var(--accent); }
+  .add-row { display: flex; gap: 8px; margin-top: 12px; }
+  .add-row input { flex: 1 1 auto; }
+  .add-row button { width: auto; flex: 0 0 auto; padding: 11px 16px; font-size: 14px; }
+  .sub-label { font-size: 12px; color: var(--muted); margin: 14px 0 6px; text-transform: uppercase; letter-spacing: .04em; }
   .hint { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
   .hint a { color: var(--accent-2); }
   button {
@@ -218,13 +226,26 @@ function renderConfigurePage({ baseUrl, existing }) {
     </div>
 
     <div class="card">
-      <h2>Topics — each becomes its own catalog</h2>
-      <div class="topic-actions">
-        <button type="button" id="select-all">Select all</button>
-        <button type="button" id="clear-all">Clear all</button>
+      <h2>Your catalogs</h2>
+      <p class="lead">
+        Each one becomes a catalog in Stremio, <strong>in this order</strong> — use the
+        arrows to arrange them. Add a preset below, or type anything you like as a
+        custom topic: it runs as a standing search and gets a catalog of its own.
+      </p>
+      <div id="topic-list"></div>
+      <div class="sub-label">Add a preset</div>
+      <div class="preset-chips" id="preset-chips"></div>
+      <div class="sub-label">Add a custom topic</div>
+      <div class="add-row">
+        <input type="text" id="custom-topic" maxlength="${MAX_QUERY_LENGTH}" placeholder="London crime" aria-label="Custom topic" />
+        <button type="button" id="add-custom">+ Add</button>
       </div>
-      <div class="topics-grid">${topicCheckboxes}</div>
-      <div class="hint">Pick at least one. Search is a single catalog covering every topic, and every catalog pages 20 stories at a time. Not every source carries every topic — Newsio simply skips a source that cannot serve one.</div>
+      <div class="hint">
+        A custom topic is a saved search — "London crime", "Arsenal", "semiconductor exports".
+        Up to ${MAX_CUSTOM_TOPICS} of them. Search is also available as its own catalog covering
+        everything, and every catalog pages 20 stories at a time. Not every source carries
+        every topic — Newsio simply skips a source that cannot serve one.
+      </div>
     </div>
 
     <button type="submit" id="submit-btn">Generate install link</button>
@@ -251,6 +272,11 @@ function renderConfigurePage({ baseUrl, existing }) {
   // this page. Keep this block backslash-free; use string methods instead.
   // test/configurePage.dom.test.js executes this script and enforces that.
   var BASE_URL = ${jsonForScript(baseUrl)};
+  var PRESETS = ${jsonForScript(PRESET_TOPICS)};
+  var MAX_CUSTOM = ${MAX_CUSTOM_TOPICS};
+  // The user's catalogs, in order. This array is the source of truth for
+  // both the list on screen and the config that gets generated.
+  var TOPICS = ${jsonForScript(selectedTopics)};
 
   var form = document.getElementById("config-form");
   var errorEl = document.getElementById("error");
@@ -295,11 +321,169 @@ function renderConfigurePage({ baseUrl, existing }) {
 
   sourcesList.addEventListener("input", refreshRanks);
 
-  document.getElementById("select-all").addEventListener("click", function () {
-    form.querySelectorAll('input[name="topics"]').forEach(function (el) { el.checked = true; });
-  });
-  document.getElementById("clear-all").addEventListener("click", function () {
-    form.querySelectorAll('input[name="topics"]').forEach(function (el) { el.checked = false; });
+  var topicList = document.getElementById("topic-list");
+  var presetChips = document.getElementById("preset-chips");
+  var customInput = document.getElementById("custom-topic");
+
+  function button(text, className, title, onClick) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.textContent = text;
+    b.className = className;
+    if (title) { b.title = title; b.setAttribute("aria-label", title); }
+    b.addEventListener("click", onClick);
+    return b;
+  }
+
+  function moveTopic(from, to) {
+    if (to < 0 || to >= TOPICS.length) return;
+    var moved = TOPICS.splice(from, 1)[0];
+    TOPICS.splice(to, 0, moved);
+    renderTopics();
+  }
+
+  // Built with createElement and textContent rather than markup, so a topic
+  // the user typed can never be interpreted as HTML.
+  function renderTopics() {
+    topicList.textContent = "";
+
+    if (TOPICS.length === 0) {
+      var empty = document.createElement("div");
+      empty.className = "topic-empty";
+      empty.textContent = "No catalogs yet — add at least one below.";
+      topicList.appendChild(empty);
+    }
+
+    TOPICS.forEach(function (topic, index) {
+      var row = document.createElement("div");
+      row.className = "topic-row";
+      row.setAttribute("data-topic-id", topic.id);
+
+      var rank = document.createElement("div");
+      rank.className = "topic-rank";
+      rank.textContent = String(index + 1);
+      row.appendChild(rank);
+
+      var label = document.createElement("div");
+      label.className = "topic-label";
+      label.textContent = topic.label;
+      row.appendChild(label);
+
+      if (topic.kind === "custom") {
+        var chip = document.createElement("span");
+        chip.className = "chip";
+        chip.textContent = "custom";
+        label.appendChild(chip);
+      }
+
+      var btns = document.createElement("div");
+      btns.className = "btns";
+      var up = button("\u25b2", "move-up", "Move " + topic.label + " up", function () { moveTopic(index, index - 1); });
+      var down = button("\u25bc", "move-down", "Move " + topic.label + " down", function () { moveTopic(index, index + 1); });
+      up.disabled = index === 0;
+      down.disabled = index === TOPICS.length - 1;
+      btns.appendChild(up);
+      btns.appendChild(down);
+      btns.appendChild(button("\u00d7", "remove", "Remove " + topic.label, function () {
+        TOPICS.splice(index, 1);
+        renderTopics();
+      }));
+      row.appendChild(btns);
+      topicList.appendChild(row);
+    });
+
+    renderPresetChips();
+  }
+
+  // Only the presets not already chosen are offered, so the chip row is a
+  // list of what is still available rather than a set of toggles.
+  function renderPresetChips() {
+    presetChips.textContent = "";
+    var chosen = {};
+    TOPICS.forEach(function (t) { chosen[t.id] = true; });
+
+    var remaining = PRESETS.filter(function (p) { return !chosen[p.id]; });
+    if (remaining.length === 0) {
+      var done = document.createElement("div");
+      done.className = "topic-empty";
+      done.textContent = "Every preset topic has been added.";
+      presetChips.appendChild(done);
+      return;
+    }
+
+    remaining.forEach(function (preset) {
+      presetChips.appendChild(button("+ " + preset.label, "", "Add " + preset.label, function () {
+        TOPICS.push({ kind: "preset", id: preset.id, label: preset.label });
+        renderTopics();
+      }));
+    });
+  }
+
+  // Character codes rather than a whitespace class: a regex escape written
+  // in this block would be eaten by the enclosing template literal and
+  // arrive as something else entirely.
+  function collapseSpaces(text) {
+    var words = [];
+    var word = "";
+    for (var i = 0; i < text.length; i++) {
+      if (text.charCodeAt(i) <= 32) {
+        if (word) { words.push(word); word = ""; }
+      } else {
+        word += text.charAt(i);
+      }
+    }
+    if (word) words.push(word);
+    return words.join(" ");
+  }
+
+  function slugify(text) {
+    var out = "";
+    var lower = text.toLowerCase();
+    for (var i = 0; i < lower.length; i++) {
+      var c = lower.charAt(i);
+      out += (c >= "a" && c <= "z") || (c >= "0" && c <= "9") ? c : "-";
+    }
+    while (out.indexOf("--") !== -1) out = out.split("--").join("-");
+    while (out.charAt(0) === "-") out = out.slice(1);
+    while (out.length && out.charAt(out.length - 1) === "-") out = out.slice(0, -1);
+    return out;
+  }
+
+  function addCustomTopic() {
+    errorEl.style.display = "none";
+    var query = collapseSpaces(customInput.value);
+    if (!query) return;
+
+    var slug = slugify(query);
+    if (!slug) {
+      showError("That topic has no letters or numbers to search for.");
+      return;
+    }
+    var id = "q_" + slug;
+    var clash = TOPICS.filter(function (t) { return t.id === id; }).length > 0;
+    if (clash) {
+      showError("You already have a catalog for that topic.");
+      return;
+    }
+    if (TOPICS.filter(function (t) { return t.kind === "custom"; }).length >= MAX_CUSTOM) {
+      showError("You can have at most " + MAX_CUSTOM + " custom topics.");
+      return;
+    }
+
+    TOPICS.push({ kind: "custom", id: id, label: query, query: query });
+    customInput.value = "";
+    renderTopics();
+  }
+
+  function showError(message) {
+    errorEl.textContent = message;
+    errorEl.style.display = "block";
+  }
+
+  document.getElementById("add-custom").addEventListener("click", addCustomTopic);
+  // Enter in the custom field adds the topic rather than submitting the form.
+  customInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") { e.preventDefault(); addCustomTopic(); }
   });
 
   form.addEventListener("submit", function (e) {
@@ -314,18 +498,17 @@ function renderConfigurePage({ baseUrl, existing }) {
     });
 
     var language = document.getElementById("language").value;
-    var topics = Array.prototype.slice
-      .call(form.querySelectorAll('input[name="topics"]:checked'))
-      .map(function (el) { return el.value; });
+    // Order matters: it is the order the catalogs appear in Stremio.
+    var topics = TOPICS.map(function (t) {
+      return t.kind === "preset" ? t.id : { q: t.query };
+    });
 
     if (sources.length === 0) {
-      errorEl.textContent = "Please enter an API key for at least one news source.";
-      errorEl.style.display = "block";
+      showError("Please enter an API key for at least one news source.");
       return;
     }
     if (topics.length === 0) {
-      errorEl.textContent = "Please select at least one topic.";
-      errorEl.style.display = "block";
+      showError("Please add at least one catalog.");
       return;
     }
 
@@ -356,6 +539,7 @@ function renderConfigurePage({ baseUrl, existing }) {
   });
 
   refreshRanks();
+  renderTopics();
 </script>
 </body>
 </html>`;

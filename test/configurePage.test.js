@@ -48,8 +48,21 @@ describe("renderConfigurePage — first-time configuration", () => {
     expect(html).not.toContain("Editing your current setup");
   });
 
-  test("lists every topic as a checkbox", () => {
-    TOPICS.forEach((t) => expect(html).toContain(`value="${t.id}"`));
+  test("ships the preset list and an empty selection to the page script", () => {
+    const { PRESET_TOPICS } = require("../src/topics");
+    PRESET_TOPICS.forEach((t) => expect(html).toContain(JSON.stringify(t.label)));
+    expect(html).toContain("var TOPICS = [];");
+  });
+
+  test("offers the controls for building an ordered catalog list", () => {
+    expect(html).toContain('id="topic-list"');
+    expect(html).toContain('id="preset-chips"');
+    expect(html).toContain('id="custom-topic"');
+    expect(html).toContain('id="add-custom"');
+  });
+
+  test("explains that the order is the catalog order", () => {
+    expect(html).toContain("in this order");
   });
 
   test("lists every supported language", () => {
@@ -100,10 +113,9 @@ describe("renderConfigurePage — re-configuration", () => {
     expect(html).toContain("pub_secret123");
   });
 
-  test("pre-checks exactly the previously selected topics", () => {
-    expect(checkedBoxes(html)).toBe(2);
-    expect(html).toContain('value="technology" checked');
-    expect(html).toContain('value="business" checked');
+  test("ships the saved topics, in order, to the page script", () => {
+    expect(html).toMatch(/var TOPICS = \[\{"kind":"preset","id":"technology"/);
+    expect(html).toContain('"id":"business"');
   });
 
   test("pre-selects the saved language", () => {
@@ -132,8 +144,17 @@ describe("renderConfigurePage — re-configuration", () => {
       baseUrl: BASE,
       existing: { sources: [{ provider: "currents", apiKey: "k" }], topics: [], language: "en" }
     });
-    expect(checkedBoxes(empty)).toBe(0);
+    expect(empty).toContain("var TOPICS = [];");
     expect(empty).toContain("Editing your current setup");
+  });
+
+  test("a custom topic is shipped with its query, not just a label", () => {
+    const withCustom = renderConfigurePage({
+      baseUrl: BASE,
+      existing: { sources: [{ provider: "currents", apiKey: "k" }], topics: [{ q: "London crime" }], language: "en" }
+    });
+    expect(withCustom).toContain('"kind":"custom"');
+    expect(withCustom).toContain('"query":"London crime"');
   });
 });
 

@@ -1,4 +1,5 @@
-const { TOPICS, getTopicById, PROVIDERS } = require("./providers");
+const { TOPICS, PROVIDERS } = require("./providers");
+const { normalizeTopics } = require("./topics");
 const { CATALOG_PAGE_SIZE } = require("./articles");
 const { isConfigured } = require("./config");
 
@@ -19,7 +20,7 @@ const CONTENT_TYPE = "news";
 const ID_PREFIXES = PROVIDERS.map((p) => p.idPrefix);
 
 const ADDON_ID = "org.deejay189393.newsio";
-const ADDON_VERSION = "0.5.1";
+const ADDON_VERSION = "0.6.0";
 const CONTACT_EMAIL = "deejay189393@users.noreply.github.com";
 const DESCRIPTION = "News on Stremio? Why not! Reads live headlines from newsdata.io, Currents and GNews.";
 
@@ -66,6 +67,10 @@ function skipExtra() {
   return { name: "skip", options: SKIP_OPTIONS };
 }
 
+/**
+ * One catalog per topic, named for it. A custom topic is no different here:
+ * its id carries the q_ prefix and its name is the text the user typed.
+ */
 function topicCatalog(topic) {
   return {
     type: CONTENT_TYPE,
@@ -113,12 +118,13 @@ function getStremioAddonsConfig() {
   };
 }
 
-// Guards the shape rather than trusting it: decodeConfig normalizes `topics`
-// to an array before the HTTP routes ever get here, but buildManifest is
-// exported and should not throw on a hand-built object.
+/**
+ * The user's topics, in their order -- which is the order their catalogs
+ * appear in Stremio. Normalized here rather than trusted: buildManifest is
+ * exported and must not throw on a hand-built object.
+ */
 function selectedTopics(config) {
-  const topics = config && config.topics;
-  return Array.isArray(topics) ? topics.map(getTopicById).filter(Boolean) : [];
+  return normalizeTopics(config && config.topics);
 }
 
 /**

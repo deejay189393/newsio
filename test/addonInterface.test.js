@@ -241,3 +241,73 @@ describe("interface wiring", () => {
     await expect(iface.get("subtitles", "news", "nd_a1", {}, CONFIG)).rejects.toMatchObject({ noHandler: true });
   });
 });
+
+describe("custom topic catalogs", () => {
+  // A config that holds both kinds, so resolving one id has to look past
+  // the other kind and past a custom topic that simply does not match.
+  const MIXED = {
+    sources: [{ provider: "newsdata", apiKey: "k" }],
+    topics: ["technology", { q: "London crime" }, { q: "Arsenal" }],
+    language: "en"
+  };
+
+  test("a custom catalog runs its saved query as a search", async () => {
+    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("s1")], nextPage: null }));
+    const res = await iface.get("catalog", "news", "q_london-crime", {}, MIXED);
+    expect(res.metas[0].id).toBe("nd_s1");
+    const url = new URL(global.fetch.mock.calls[0][0]);
+    expect(url.searchParams.get("q")).toBe("London crime");
+    expect(url.searchParams.has("category")).toBe(false);
+  });
+
+  test("each custom catalog runs its own query", async () => {
+    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("s1")], nextPage: null }));
+    await iface.get("catalog", "news", "q_arsenal", {}, MIXED);
+    expect(new URL(global.fetch.mock.calls[0][0]).searchParams.get("q")).toBe("Arsenal");
+  });
+
+  test("a preset in the same config still browses its category", async () => {
+    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("a1")], nextPage: null }));
+    await iface.get("catalog", "news", "technology", {}, MIXED);
+    const url = new URL(global.fetch.mock.calls[0][0]);
+    expect(url.searchParams.get("category")).toBe("technology");
+    expect(url.searchParams.has("q")).toBe(false);
+  });
+
+  test("a custom catalog paginates like any other", async () => {
+    const page = (start, next) =>
+      ok({ results: Array.from({ length: 10 }, (_, k) => article(`s${start + k}`)), nextPage: next });
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(page(0, "T1"))
+      .mockResolvedValueOnce(page(10, "T2"))
+      .mockResolvedValueOnce(page(20, "T3"))
+      .mockResolvedValueOnce(page(30, null));
+    const p1 = await iface.get("catalog", "news", "q_london-crime", {}, MIXED);
+    const p2 = await iface.get("catalog", "news", "q_london-crime", { skip: "20" }, MIXED);
+    expect(p1.metas).toHaveLength(20);
+    expect(p2.metas[0].id).toBe("nd_s20");
+  });
+
+  // The id has to be in the user's own config: another user's catalog id
+  // means nothing here, and must not become an open search proxy.
+  test("a custom id not in this config serves nothing", async () => {
+    global.fetch = jest.fn();
+    const res = await iface.get("catalog", "news", "q_somebody-elses-topic", {}, MIXED);
+    expect(res.metas).toEqual([]);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test("an unknown id that is neither preset nor custom serves nothing", async () => {
+    global.fetch = jest.fn();
+    expect((await iface.get("catalog", "news", "not-a-topic", {}, MIXED)).metas).toEqual([]);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test("the Video News catalog asks newsdata for video stories", async () => {
+    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("v1")], nextPage: null }));
+    const cfg = { sources: [{ provider: "newsdata", apiKey: "k" }], topics: ["video"], language: "en" };
+    await iface.get("catalog", "news", "video", {}, cfg);
+    expect(new URL(global.fetch.mock.calls[0][0]).searchParams.get("video")).toBe("1");
+  });
+});
