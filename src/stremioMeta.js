@@ -172,17 +172,26 @@ function slugFamilySegments(keywords) {
   return new Set([...counts.entries()].filter(([, n]) => n > 1).map(([segment]) => segment));
 }
 
+/**
+ * Title Case: every word starts with a capital.
+ *
+ * newsdata.io returns keywords entirely in lower case (all 386 in a sample
+ * of 102 stories), so the input is normalized rather than trusted -- an
+ * upstream change to SHOUTING or mIxEd casing still renders the same way.
+ * Hyphenated compounds are capitalised on both sides ("sci-fi" -> "Sci-Fi"),
+ * since each part reads as its own word. Known initialisms stay fully
+ * upper, because "AI" is right where "Ai" is simply wrong.
+ */
 function titleCaseTag(tag) {
   return tag
-    .split(/\s+/)
-    .map((word) => {
-      const lower = word.toLowerCase();
-      // Deliberate casing wins: "iPhone" must not become "IPHONE".
-      if (word !== lower) return word;
-      if (ACRONYMS.has(lower)) return lower.toUpperCase();
-      return word.charAt(0).toUpperCase() + word.slice(1);
+    .toLowerCase()
+    .split(/(\s+|-)/) // keep the separators so they can be re-joined as-is
+    .map((part) => {
+      if (!part || !part.trim() || part === "-") return part;
+      if (ACRONYMS.has(part)) return part.toUpperCase();
+      return part.charAt(0).toUpperCase() + part.slice(1);
     })
-    .join(" ");
+    .join("");
 }
 
 /**

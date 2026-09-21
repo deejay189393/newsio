@@ -179,9 +179,16 @@ which is filtered:
 | Whole clauses | `sixth edition of mangaluru technovanza -2026` |
 
 A family is only treated as a CMS taxonomy when two or more keywords share a
-hyphen segment, so a lone `sci-fi` survives as the real tag it is. What is left
-is title-cased, with initialisms (`ai` → `AI`, `nasa` → `NASA`) kept upper and
-deliberate casing (`iPhone`) preserved, then capped at six.
+hyphen segment, so a lone `sci-fi` survives as the real tag it is.
+
+What is left is rendered in Title Case — every word starts with a capital,
+including both halves of a hyphenated compound (`sci-fi` → `Sci-Fi`,
+`multi-asset trading` → `Multi-Asset Trading`). newsdata.io returns keywords
+entirely in lower case (all 386 of them across a 102-story sample), but the
+input is normalised rather than trusted, so an upstream change to SHOUTING or
+mixed casing still renders the same way. Known initialisms stay fully upper
+(`ai` → `AI`, `nasa` → `NASA`), because "AI" is right where "Ai" is simply
+wrong. The row is capped at six.
 
 ## Ads
 
@@ -246,7 +253,7 @@ npm start           # http://localhost:3000/configure
 ```
 
 ```bash
-npm test            # 421 tests
+npm test            # 432 tests
 npm run test:coverage
 ```
 
