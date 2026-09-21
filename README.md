@@ -117,13 +117,21 @@ npm start           # http://localhost:3000/configure
 ```
 
 ```bash
-npm test            # 198 tests
+npm test            # 221 tests
 npm run test:coverage
 ```
 
 Tests mock the newsdata.io API throughout — no key or network needed — and
 coverage is pinned at **100%** of statements, branches, functions and lines by
 a `coverageThreshold` in `package.json`, so a regression fails the build.
+
+The configure page's inline script is additionally executed in a real DOM
+(`test/configurePage.dom.test.js`, via jsdom) rather than only asserted on as
+markup: the form is submitted, the topic bulk actions and the copy button are
+clicked, and the install URL that comes out is decoded back through the
+server's own config parser. Line coverage cannot see into a `<script>` that is
+emitted as a string, so that page needs behavioural tests to be covered at
+all.
 
 ## Deploying
 
