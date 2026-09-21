@@ -165,7 +165,7 @@ describe("toMetaPreview", () => {
 describe("toFullMeta", () => {
   test("includes genre, website and a source link", () => {
     const m = toFullMeta(videoArticle);
-    expect(m.genres).toEqual(["technology"]);
+    expect(m.genres).toEqual(["Technology"]);
     expect(m.website).toBe("https://example.com/a1");
     expect(m.links[0]).toEqual({ name: "Example News", category: "source", url: "https://example.com/a1" });
   });
@@ -295,27 +295,165 @@ describe("toStreams", () => {
   });
 });
 
-describe("buildGenres", () => {
-  test("leads with the category, then the story's own keywords", () => {
-    expect(buildGenres({ category: "technology", keywords: ["chips", "ai"] })).toEqual([
-      "technology",
-      "chips",
-      "ai"
-    ]);
+describe("buildGenres — the detail page tag row", () => {
+  const g = (article) => buildGenres(article);
+
+  // Regression: newsdata.io puts "top" on roughly half of everything, and it
+  // is usually category[0] -- so serving that field verbatim labelled most
+  // stories "top" and told the reader nothing.
+  describe('the "top" pseudo-category', () => {
+    test('is never shown, even when it is the only category', () => {
+      expect(g({ categories: ["top"], keywords: [] })).toBeUndefined();
+    });
+
+    test("is dropped in favour of the real subject beside it", () => {
+      expect(g({ categories: ["top", "technology"], keywords: [] })).toEqual(["Technology"]);
+    });
+
+    test("is dropped wherever it appears in the list", () => {
+      expect(g({ categories: ["politics", "top"], keywords: [] })).toEqual(["Politics"]);
+    });
+
+    test("never survives into the rendered meta", () => {
+      const meta = toFullMeta({ ...textArticle, categories: ["top", "business"], keywords: ["markets"] });
+      expect(meta.genres).not.toContain("top");
+      expect(meta.genres).toContain("Finance & Business");
+    });
   });
 
-  test("de-duplicates and caps the tag row", () => {
-    expect(buildGenres({ category: "tech", keywords: ["tech", "tech"] })).toEqual(["tech"]);
-    expect(buildGenres({ category: "a", keywords: ["b", "c", "d", "e", "f", "g", "h"] })).toHaveLength(6);
+  describe("categories", () => {
+    test("use the display names the configure page uses", () => {
+      expect(g({ categories: ["business"], keywords: [] })).toEqual(["Finance & Business"]);
+      expect(g({ categories: ["tourism"], keywords: [] })).toEqual(["Tourism & Travel"]);
+    });
+
+    test("an unknown category is still shown, title-cased", () => {
+      expect(g({ categories: ["nanotech"], keywords: [] })).toEqual(["Nanotech"]);
+    });
+
+    test("are capped, so they cannot crowd out the specific tags", () => {
+      const out = g({ categories: ["technology", "science", "health"], keywords: ["chips"] });
+      expect(out).toEqual(["Technology", "Science", "Chips"]);
+    });
+
+    // A real CNN story came back tagged with twelve categories.
+    test("a spray-tagged story shows no categories at all", () => {
+      const sprayed = {
+        categories: [
+          "education", "tourism", "health", "sports", "world", "environment",
+          "politics", "entertainment", "science", "top", "business", "technology"
+        ],
+        keywords: ["coffee"]
+      };
+      expect(g(sprayed)).toEqual(["Coffee"]);
+    });
+
+    test("falls back to the single category field when the list is absent", () => {
+      expect(g({ category: "science", keywords: [] })).toEqual(["Science"]);
+    });
   });
 
-  test("drops blanks and non-strings", () => {
-    expect(buildGenres({ category: null, keywords: ["  ", 5, "ok"] })).toEqual(["ok"]);
+  describe("keywords", () => {
+    test("are the specific part, and follow the categories", () => {
+      expect(g({ categories: ["top", "technology"], keywords: ["artificial intelligence", "gen z"] })).toEqual([
+        "Technology",
+        "Artificial Intelligence",
+        "Gen Z"
+      ]);
+    });
+
+    test.each([
+      "news", "latest news", "breaking news", "top stories", "headlines", "world news"
+    ])("the format tag %p is dropped", (kw) => {
+      expect(g({ categories: [], keywords: [kw, "porsche"] })).toEqual(["Porsche"]);
+    });
+
+    test("a whole clause is not a tag", () => {
+      const clause = "sixth edition of mangaluru technovanza -2026";
+      expect(g({ categories: [], keywords: [clause, "startups"] })).toEqual(["Startups"]);
+    });
+
+    test("an author handle or slug with an underscore is dropped", () => {
+      expect(g({ categories: [], keywords: ["yashu_crypto", "avalanche"] })).toEqual(["Avalanche"]);
+    });
+
+    test.each(["home page 3", "yahoo feed"])("site navigation tag %p is dropped", (kw) => {
+      expect(g({ categories: [], keywords: [kw, "markets"] })).toEqual(["Markets"]);
+    });
+
+    test("the publisher's own name is not a subject", () => {
+      expect(g({ sourceName: "Mail Online", sourceId: "dailymail", categories: [], keywords: ["dailymail", "royals"] })).toEqual(
+        ["Royals"]
+      );
+      expect(g({ sourceName: "Fox News", categories: [], keywords: ["fox news", "senate"] })).toEqual(["Senate"]);
+    });
+
+    // CNN's "underscored-*" section slugs, Seeking Alpha's "*-usd" tickers.
+    test("a CMS slug family is recognised and dropped whole", () => {
+      const cnn = ["underscored-coffee", "underscored-testing", "underscored-reviews", "espresso"];
+      expect(g({ categories: [], keywords: cnn })).toEqual(["Espresso"]);
+    });
+
+    test("a family sharing a trailing segment is dropped too", () => {
+      expect(g({ categories: [], keywords: ["eth-usd", "btc-usd", "xzc-usd", "regulation"] })).toEqual([
+        "Regulation"
+      ]);
+    });
+
+    test("a hyphenated keyword with an empty segment is handled", () => {
+      expect(buildGenres({ categories: [], keywords: ["-lead-", "markets"] })).toEqual(["-lead-", "Markets"]);
+    });
+
+    test("a lone hyphenated keyword is a real tag and survives", () => {
+      expect(g({ categories: [], keywords: ["sci-fi", "apple tv"] })).toEqual(["Sci-fi", "Apple TV"]);
+    });
   });
 
-  test("is undefined when a story has no tags at all", () => {
-    expect(buildGenres({ category: null, keywords: [] })).toBeUndefined();
-    expect(buildGenres({})).toBeUndefined();
+  describe("presentation", () => {
+    test("tags are title-cased for display", () => {
+      expect(g({ categories: [], keywords: ["jensen huang", "digital wallet"] })).toEqual([
+        "Jensen Huang",
+        "Digital Wallet"
+      ]);
+    });
+
+    test.each([
+      ["ai", "AI"],
+      ["us", "US"],
+      ["nasa", "NASA"],
+      ["fifa", "FIFA"],
+      ["ev", "EV"]
+    ])("the initialism %p renders as %p", (raw, shown) => {
+      expect(g({ categories: [], keywords: [raw] })).toEqual([shown]);
+    });
+
+    test("deliberate casing is preserved", () => {
+      expect(g({ categories: [], keywords: ["iPhone"] })).toEqual(["iPhone"]);
+    });
+
+    test("de-duplicates case-insensitively across categories and keywords", () => {
+      expect(g({ categories: ["technology"], keywords: ["Technology", "technology", "chips"] })).toEqual([
+        "Technology",
+        "Chips"
+      ]);
+    });
+
+    test("the row is capped at six tags", () => {
+      const many = ["a", "b", "c", "d", "e", "f", "g", "h"];
+      expect(g({ categories: ["technology"], keywords: many })).toHaveLength(6);
+    });
+  });
+
+  describe("nothing to show", () => {
+    test.each([
+      ["no tags at all", { categories: [], keywords: [] }],
+      ["an empty object", {}],
+      ["only blanks and non-strings", { categories: [], keywords: ["  ", 5, null] }],
+      ["only the top pseudo-category", { categories: ["top"], keywords: [] }],
+      ["only generic keywords", { categories: [], keywords: ["news", "latest news"] }]
+    ])("%s yields undefined rather than an empty row", (_label, article) => {
+      expect(g(article)).toBeUndefined();
+    });
   });
 });
 

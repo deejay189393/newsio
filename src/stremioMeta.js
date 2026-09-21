@@ -1,4 +1,5 @@
 const { CONTENT_TYPE } = require("./manifest");
+const { getTopicLabel } = require("./topics");
 const { FALLBACK_POSTER, FALLBACK_BACKGROUND } = require("./fallbackImages");
 
 /**
@@ -88,15 +89,153 @@ function toMetaPreview(article) {
 }
 
 /**
- * Genres double as the detail page's tag row, so the story's own keywords
- * ride along with its category rather than being thrown away.
+ * newsdata.io puts "top" on roughly half of everything it returns. It means
+ * "this is in the top-stories feed" -- a feed designation, not a subject --
+ * and it is usually the first entry in `category`, so showing that field
+ * verbatim labelled most stories "top" and said nothing about any of them.
+ */
+const NON_SUBJECT_CATEGORIES = new Set(["top"]);
+
+/**
+ * Keywords describing the format or the publisher rather than the subject.
+ * newsdata.io passes through whatever the outlet tagged its own article
+ * with, so alongside genuinely useful terms ("artificial intelligence",
+ * "gen z") come house tags like "latest news" and the outlet's own name.
+ */
+const GENERIC_KEYWORDS = new Set([
+  "news",
+  "latest news",
+  "breaking news",
+  "top stories",
+  "top news",
+  "headlines",
+  "latest",
+  "update",
+  "updates",
+  "today",
+  "article",
+  "articles",
+  "report",
+  "reports",
+  "world news",
+  "daily news"
+]);
+
+/** Initialisms that read wrong in title case. */
+const ACRONYMS = new Set([
+  "ai", "ar", "vr", "us", "uk", "eu", "un", "uae", "gdp", "ceo", "cfo", "cto",
+  "ipo", "suv", "ev", "nasa", "nfl", "nba", "mlb", "nhl", "ipl", "fifa", "uefa",
+  "gps", "api", "tv", "pc"
+]);
+
+// A tag, not a sentence: newsdata.io keywords occasionally run to a whole
+// clause ("sixth edition of mangaluru technovanza -2026"), which is useless
+// in a tag row and pushes the real tags out.
+const MAX_TAG_LENGTH = 28;
+const MAX_TAGS = 6;
+const MAX_CATEGORY_TAGS = 2;
+
+/**
+ * Above this, the category list is noise rather than classification: one
+ * CNN story in a sample of 79 came back tagged with twelve categories --
+ * education, tourism, health, sports, world, environment, politics,
+ * entertainment, science, business and technology -- which says nothing
+ * about it. A story genuinely spanning four subjects does not exist.
+ */
+const MAX_MEANINGFUL_CATEGORIES = 3;
+
+/** Strip everything but letters and digits, for comparing names to tags. */
+function fold(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Publisher CMS taxonomies masquerading as subjects.
+ *
+ * An outlet's own section slugs arrive as keywords and always come in
+ * families sharing a segment -- CNN's "underscored-coffee",
+ * "underscored-testing", "underscored-reviews"; Seeking Alpha's "eth-usd",
+ * "btc-usd", "xzc-usd". A lone hyphenated keyword ("sci-fi") is a real tag,
+ * so only repeated segments are treated as a taxonomy.
+ */
+function slugFamilySegments(keywords) {
+  const counts = new Map();
+  keywords
+    .filter((k) => k.includes("-"))
+    .forEach((k) => {
+      new Set(k.toLowerCase().split("-")).forEach((segment) => {
+        if (segment) counts.set(segment, (counts.get(segment) || 0) + 1);
+      });
+    });
+  return new Set([...counts.entries()].filter(([, n]) => n > 1).map(([segment]) => segment));
+}
+
+function titleCaseTag(tag) {
+  return tag
+    .split(/\s+/)
+    .map((word) => {
+      const lower = word.toLowerCase();
+      // Deliberate casing wins: "iPhone" must not become "IPHONE".
+      if (word !== lower) return word;
+      if (ACRONYMS.has(lower)) return lower.toUpperCase();
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    })
+    .join(" ");
+}
+
+/**
+ * The tag row on the detail page.
+ *
+ * Categories come first -- they are newsdata.io's own reliable taxonomy, so
+ * they get the same display names the configure page uses -- then the
+ * story's own keywords, which are the genuinely specific part (present on
+ * about four fifths of stories, typically three of them).
  */
 function buildGenres(article) {
-  const genres = [article.category, ...(article.keywords || [])]
-    .filter((g) => typeof g === "string" && g.trim())
-    .map((g) => g.trim());
-  const unique = [...new Set(genres)];
-  return unique.length ? unique.slice(0, 6) : undefined;
+  const rawCategories = (
+    Array.isArray(article.categories) && article.categories.length
+      ? article.categories
+      : [article.category]
+  )
+    .filter((c) => typeof c === "string" && c.trim())
+    .map((c) => c.trim().toLowerCase())
+    .filter((c) => !NON_SUBJECT_CATEGORIES.has(c));
+
+  const categories =
+    rawCategories.length > MAX_MEANINGFUL_CATEGORIES
+      ? []
+      : rawCategories.slice(0, MAX_CATEGORY_TAGS).map((c) => getTopicLabel(c) || titleCaseTag(c));
+
+  const rawKeywords = (article.keywords || []).filter((k) => typeof k === "string").map((k) => k.trim());
+  const slugSegments = slugFamilySegments(rawKeywords);
+  const publisher = [fold(article.sourceName), fold(article.sourceId)].filter(Boolean);
+
+  const keywords = rawKeywords
+    .filter((k) => {
+      const lower = k.toLowerCase();
+      if (!k || k.length > MAX_TAG_LENGTH) return false;
+      if (GENERIC_KEYWORDS.has(lower)) return false;
+      if (k.includes("_")) return false; // author handles and slugs
+      if (lower.includes("home page") || lower.endsWith("feed")) return false; // site navigation
+      if (publisher.some((p) => p && (p === fold(k) || p.includes(fold(k))))) return false;
+      if (lower.split("-").some((segment) => slugSegments.has(segment))) return false;
+      return true;
+    })
+    .map(titleCaseTag);
+
+  const seen = new Set();
+  const tags = [];
+  for (const tag of [...categories, ...keywords]) {
+    const key = tag.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    tags.push(tag);
+    if (tags.length === MAX_TAGS) break;
+  }
+
+  return tags.length ? tags : undefined;
 }
 
 /** Full metadata for the item detail page. */

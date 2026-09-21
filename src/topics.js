@@ -32,6 +32,16 @@ function isValidTopicId(id) {
   return TOPICS_BY_ID.has(id);
 }
 
+/**
+ * The display label for a newsdata.io category id, when we have one.
+ * Used to turn the raw ids it returns ("business") into the names the
+ * configure page already uses ("Finance & Business").
+ */
+function getTopicLabel(id) {
+  const topic = TOPICS_BY_ID.get(id);
+  return topic ? topic.label : null;
+}
+
 // Languages supported by newsdata.io (common subset).
 const LANGUAGES = [
   { code: "en", label: "English" },
@@ -51,4 +61,4 @@ const LANGUAGES = [
 
 const VALID_LANGUAGE_CODES = new Set(LANGUAGES.map((l) => l.code));
 
-module.exports = { TOPICS, getTopicById, isValidTopicId, LANGUAGES, VALID_LANGUAGE_CODES };
+module.exports = { TOPICS, getTopicById, getTopicLabel, isValidTopicId, LANGUAGES, VALID_LANGUAGE_CODES };

@@ -187,7 +187,7 @@ describe("meta handler", () => {
     expect(res.meta.type).toBe("news");
     expect(res.meta.name).toBe("Title a1");
     expect(res.meta.poster).toBe("https://e.com/i.jpg");
-    expect(res.meta.genres).toEqual(["technology"]);
+    expect(res.meta.genres).toEqual(["Technology"]);
     expect(res.cacheMaxAge).toBe(3600);
   });
 

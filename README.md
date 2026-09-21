@@ -23,6 +23,12 @@ real metadata for every story and a playable stream when the story has video.
 - **No syndicated duplicates.** newsdata.io is asked to collapse the same story
   republished by a dozen outlets (`removeduplicate`), which on a technology
   feed drops the result count by about a third.
+- **Real tags per story.** The detail page shows the story's subject and its
+  own keywords — "Technology | Security", "Divorce | Child Custody |
+  Artificial Intelligence" — rather than the useless `top` that newsdata.io
+  stamps on half its feed (see *Tags* below).
+- **Content farms and affiliate posts filtered** as far as the API allows
+  (see *Ads* below).
 - **Real metadata per item** — title, description, poster, backdrop, publish
   date, genre, source and author links — served from the addon's own `meta`
   handler.
@@ -137,13 +143,78 @@ result sliced, rather than rounded down to the containing page.
 
 Newsio never truncates. `description` is served in full — it runs to roughly a
 thousand characters on some stories — and the detail page adds a
-`source · byline · date` line beneath it, with the story's own keywords
-surfaced as genres.
+`source · byline · date` line beneath it.
 
 One thing to know about the free tier: newsdata.io fills `content`,
 `ai_summary` and several other fields with the literal string
 `ONLY AVAILABLE IN PAID PLANS`. Those are treated as absent, so an upsell
 string can never reach a reader as though it were the article.
+
+## Tags
+
+The `genres` field carries the story's tag row. Two things go into it.
+
+**Categories.** newsdata.io stamps `top` on roughly half of everything it
+returns, and it is usually first in the `category` array — so serving that
+field verbatim labelled most stories "top" and said nothing about any of them.
+`top` is a feed designation, not a subject, and is dropped. Real categories are
+shown under the same names the configure page uses (`business` →
+"Finance & Business"). A story tagged with more than three categories is
+ignoring the taxonomy rather than using it — one CNN story in a sample of 79
+came back tagged with *twelve* — so its categories are dropped entirely.
+
+**Keywords.** Present on about 82% of stories, typically three each, and
+genuinely specific ("artificial intelligence", "gen z", "digital wallet").
+They are the publisher's own tags, though, so they also carry house noise,
+which is filtered:
+
+| Dropped | Example |
+|---|---|
+| Format tags | `latest news`, `breaking news`, `headlines` |
+| CMS slug families | `underscored-coffee`, `underscored-testing`, … |
+| Ticker families | `eth-usd`, `btc-usd`, `xzc-usd` |
+| Author handles | `yashu_crypto` |
+| Site navigation | `home page 3`, `yahoo feed` |
+| The publisher's own name | `dailymail` on a Mail Online story |
+| Whole clauses | `sixth edition of mangaluru technovanza -2026` |
+
+A family is only treated as a CMS taxonomy when two or more keywords share a
+hyphen segment, so a lone `sci-fi` survives as the real tag it is. What is left
+is title-cased, with initialisms (`ai` → `AI`, `nasa` → `NASA`) kept upper and
+deliberate casing (`iPhone`) preserved, then capped at six.
+
+## Ads
+
+**newsdata.io has no advertisement flag.** Tested directly: the API exposes
+`datatype` (`news`, `blog`, `review`, `multimedia`, `podcast`, `analysis`) and
+a `duplicate` boolean, and nothing that marks sponsored or affiliate content. A
+plain affiliate post — *"Power outages happen: save up to 57% on EcoFlow power
+stations"*, USA Today — arrives as `datatype: "news"`, indistinguishable from
+reporting. There is no deterministic tag to filter on.
+
+Two signals that *do* exist are used instead:
+
+- **`source_priority`** ranks the publisher, lower being more reputable (Google
+  News 14, CNN 165). SEO content farms sit orders of magnitude higher —
+  5,143,682 for the outlet behind *"Contrasting SK hynix (SKHY) and Its
+  Competitors"*, 99,999,999 for another. Anything above 2,000,000 is dropped,
+  a cut set far above every genuine outlet observed (the least reputable real
+  publisher in the sample sits at 1,200,410).
+- **Commerce wording** that reporting does not use, matched over the headline
+  *and* the description — which is where *"Start streaming DIRECTV & save up to
+  $30 off"* was hiding inside an otherwise ordinary sports article. Kept
+  deliberately narrow: a discount in a headline is often the news itself
+  ("Government cuts rail fares by 50%"), so only retail phrasing counts.
+
+Across a 102-article sample this dropped 11 stories, every one of them a
+content farm or a retail post, with no false positives. It is not a substitute
+for a flag the API does not provide: an affiliate post from a reputable outlet
+with neutral wording still gets through.
+
+newsdata.io also offers `prioritydomain=top`, which cuts the pool much harder
+(6,672 results → 1,948 on a technology feed). It is not used by default because
+that would thin niche topics badly, and it would not have caught the USA Today
+ad anyway.
 
 ## Caching
 
@@ -175,7 +246,7 @@ npm start           # http://localhost:3000/configure
 ```
 
 ```bash
-npm test            # 357 tests
+npm test            # 421 tests
 npm run test:coverage
 ```
 
