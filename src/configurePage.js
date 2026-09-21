@@ -101,7 +101,7 @@ function renderConfigurePage({ baseUrl, existing }) {
         <p class="source-note">${escapeHtml(provider.notes)}</p>
         <div class="key-row">
           <input type="password" class="source-key" placeholder="${escapeHtml(provider.keyPlaceholder)}" value="${escapeHtml(key)}" aria-label="${escapeHtml(provider.label)} key" />
-          <button type="button" class="key-toggle" title="Show key" aria-label="Show ${escapeHtml(provider.label)} key" aria-pressed="false">&#128065;</button>
+          <button type="button" class="key-toggle" title="Show key" aria-label="Show ${escapeHtml(provider.label)} key" aria-pressed="false"><svg class="eye-open" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M1.8 12s3.8-7 10.2-7 10.2 7 10.2 7-3.8 7-10.2 7S1.8 12 1.8 12Z"/><circle cx="12" cy="12" r="3"/></svg><svg class="eye-shut" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9.9 5.2A9.6 9.6 0 0 1 12 5c6.4 0 10.2 7 10.2 7a17 17 0 0 1-2.9 3.7M6.5 6.7A17 17 0 0 0 1.8 12S5.6 19 12 19a9.4 9.4 0 0 0 4.2-.95"/><path d="M10 10a3 3 0 0 0 4 4"/><path d="M2.5 2.5l19 19"/></svg></button>
         </div>${provider.id === "youtube" ? youtubePlaybackField(youtubePlayback) : ""}
         <div class="source-links"><a href="${escapeHtml(provider.signupUrl)}" target="_blank" rel="noopener">Get a free ${escapeHtml(provider.label)} key</a></div>
       </div>`;
@@ -160,10 +160,16 @@ function renderConfigurePage({ baseUrl, existing }) {
   .key-row input { flex: 1 1 auto; min-width: 0; }
   .key-toggle {
     flex: 0 0 auto; width: 44px; background: #0d0f14; border: 1px solid var(--border);
-    color: var(--muted); border-radius: 9px; font-size: 15px; cursor: pointer; line-height: 1;
+    color: var(--muted); border-radius: 9px; cursor: pointer; padding: 0;
+    display: flex; align-items: center; justify-content: center;
   }
   .key-toggle:hover { color: var(--text); border-color: var(--accent-2); }
+  .key-toggle:focus-visible { outline: 2px solid var(--accent-2); }
+  /* Both glyphs ship in the markup; only the state decides which shows. */
+  .key-toggle .eye-shut { display: none; }
   .key-toggle[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+  .key-toggle[aria-pressed="true"] .eye-open { display: none; }
+  .key-toggle[aria-pressed="true"] .eye-shut { display: block; }
   .source-option { margin: 12px 0 0; }
   .source-option select { background: #12151c; }
   .source { background: #0d0f14; border: 1px solid var(--border); border-radius: 11px; padding: 14px; margin-bottom: 10px; }
