@@ -1,6 +1,7 @@
 const { clearAllCaches } = require("../src/cache");
 const { createAddonInterface } = require("../src/addonInterface");
 const { PAGE_SIZE } = require("../src/newsdata");
+const { SEARCH_CATALOG_ID } = require("../src/manifest");
 
 let iface;
 beforeEach(() => {
@@ -71,12 +72,12 @@ describe("catalog handler", () => {
     expect(console.error).toHaveBeenCalled();
   });
 
-  test("search sends a free-text query and drops the category filter", async () => {
+  test("a query aimed at a topic catalog is ignored -- it browses the topic", async () => {
     global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("s1")], nextPage: null }));
     const res = await iface.get("catalog", "news", "technology", { search: "ai chips" }, CONFIG);
     const url = new URL(global.fetch.mock.calls[0][0]);
-    expect(url.searchParams.get("q")).toBe("ai chips");
-    expect(url.searchParams.has("category")).toBe(false);
+    expect(url.searchParams.has("q")).toBe(false);
+    expect(url.searchParams.get("category")).toBe("technology");
     expect(res.metas[0].id).toBe("nd_s1");
   });
 
@@ -106,10 +107,61 @@ describe("catalog handler", () => {
       .fn()
       .mockResolvedValueOnce(ok({ results: [article("s1")], nextPage: "T1" }))
       .mockResolvedValueOnce(ok({ results: [article("s2")], nextPage: null }));
-    await iface.get("catalog", "news", "technology", { search: "chips" }, CONFIG);
-    const p2 = await iface.get("catalog", "news", "technology", { search: "chips", skip: String(PAGE_SIZE) }, CONFIG);
+    await iface.get("catalog", "news", SEARCH_CATALOG_ID, { search: "chips" }, CONFIG);
+    const p2 = await iface.get(
+      "catalog",
+      "news",
+      SEARCH_CATALOG_ID,
+      { search: "chips", skip: String(PAGE_SIZE) },
+      CONFIG
+    );
     expect(p2.metas[0].id).toBe("nd_s2");
     expect(new URL(global.fetch.mock.calls[1][0]).searchParams.get("q")).toBe("chips");
+  });
+});
+
+describe("search catalog", () => {
+  test("runs a free-text query with no category filter", async () => {
+    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("s1")], nextPage: null }));
+    const res = await iface.get("catalog", "news", SEARCH_CATALOG_ID, { search: "ai chips" }, CONFIG);
+    const url = new URL(global.fetch.mock.calls[0][0]);
+    expect(url.searchParams.get("q")).toBe("ai chips");
+    expect(url.searchParams.has("category")).toBe(false);
+    expect(res.metas[0].id).toBe("nd_s1");
+  });
+
+  test("returns nothing, and calls nobody, without a query", async () => {
+    global.fetch = jest.fn();
+    expect((await iface.get("catalog", "news", SEARCH_CATALOG_ID, {}, CONFIG)).metas).toEqual([]);
+    expect((await iface.get("catalog", "news", SEARCH_CATALOG_ID, undefined, CONFIG)).metas).toEqual([]);
+    expect((await iface.get("catalog", "news", SEARCH_CATALOG_ID, { search: "" }, CONFIG)).metas).toEqual([]);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test("honours the configured language", async () => {
+    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("s1")], nextPage: null }));
+    await iface.get("catalog", "news", SEARCH_CATALOG_ID, { search: "x" }, { ...CONFIG, language: "fr" });
+    expect(new URL(global.fetch.mock.calls[0][0]).searchParams.get("language")).toBe("fr");
+  });
+
+  test("still needs an API key", async () => {
+    global.fetch = jest.fn();
+    expect((await iface.get("catalog", "news", SEARCH_CATALOG_ID, { search: "x" }, {})).metas).toEqual([]);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test("degrades to an empty shelf when newsdata.io fails", async () => {
+    jest.spyOn(console, "error").mockImplementation(() => {});
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 429, json: async () => ({ message: "limit" }) });
+    expect((await iface.get("catalog", "news", SEARCH_CATALOG_ID, { search: "x" }, CONFIG)).metas).toEqual([]);
+  });
+
+  test("marks video results in the name, like any other catalog", async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValue(ok({ results: [article("s1", { video_url: "https://v/x.mp4" })], nextPage: null }));
+    const res = await iface.get("catalog", "news", SEARCH_CATALOG_ID, { search: "x" }, CONFIG);
+    expect(res.metas[0].name.startsWith("\u25b6 ")).toBe(true);
   });
 });
 

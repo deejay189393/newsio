@@ -12,8 +12,13 @@ beforeEach(() => {
 });
 
 describe("manifest basics", () => {
-  test("version is the initial release 0.1.0", () => {
-    expect(M.ADDON_VERSION).toBe("0.1.0");
+  test("version is 0.2.0", () => {
+    expect(M.ADDON_VERSION).toBe("0.2.0");
+  });
+
+  test("uses the short addon description", () => {
+    expect(M.DESCRIPTION).toBe("News on Stremio? Why not! Uses the newsdata.io API.");
+    expect(M.getUnconfiguredManifest(BASE_URL).description).toBe(M.DESCRIPTION);
   });
 
   test("uses the custom news content type, not movie/series/channel", () => {
@@ -58,22 +63,64 @@ describe("unconfigured manifest", () => {
 });
 
 describe("configured manifest", () => {
+  const topicCatalogs = (m) => m.catalogs.filter((c) => c.id !== M.SEARCH_CATALOG_ID);
+  const searchCatalogOf = (m) => m.catalogs.find((c) => c.id === M.SEARCH_CATALOG_ID);
+
   test("turns each selected topic into its own catalog named after the topic", () => {
     const m = M.buildManifest({ apiKey: "x", topics: ["technology", "business"] }, BASE_URL);
-    expect(m.catalogs).toHaveLength(2);
-    expect(m.catalogs.map((c) => c.name)).toEqual(["Technology", "Finance & Business"]);
-    expect(m.catalogs.map((c) => c.id)).toEqual(["technology", "business"]);
+    expect(topicCatalogs(m).map((c) => c.name)).toEqual(["Technology", "Finance & Business"]);
+    expect(topicCatalogs(m).map((c) => c.id)).toEqual(["technology", "business"]);
   });
 
   test("preserves the order the user's topics were given in", () => {
     const m = M.buildManifest({ topics: ["sports", "top", "health"] }, BASE_URL);
-    expect(m.catalogs.map((c) => c.id)).toEqual(["sports", "top", "health"]);
+    expect(topicCatalogs(m).map((c) => c.id)).toEqual(["sports", "top", "health"]);
   });
 
-  test("every catalog advertises search and skip support", () => {
+  test("topic catalogs are browse-only: skip, but no search", () => {
     const m = M.buildManifest({ topics: ["technology"] }, BASE_URL);
-    expect(m.catalogs[0].type).toBe("news");
-    expect(m.catalogs[0].extra).toEqual([{ name: "search" }, { name: "skip" }]);
+    topicCatalogs(m).forEach((c) => {
+      expect(c.type).toBe("news");
+      expect(c.extra).toEqual([{ name: "skip" }]);
+      expect(c.extra.some((e) => e.name === "search")).toBe(false);
+    });
+  });
+
+  // Regression: search used to be declared on every topic catalog, so a
+  // single query produced one identical result row per selected topic --
+  // "Top Stories - News", "Technology - News", "Science - News", ... all
+  // showing the same articles.
+  test("exactly one catalog in the whole manifest handles search", () => {
+    const m = M.buildManifest({ topics: ["top", "technology", "science", "health"] }, BASE_URL);
+    const searchable = m.catalogs.filter((c) => c.extra.some((e) => e.name === "search"));
+    expect(searchable).toHaveLength(1);
+    expect(searchable[0].id).toBe(M.SEARCH_CATALOG_ID);
+  });
+
+  test("the search catalog is named for the addon, so the row reads \"Newsio\"", () => {
+    const m = M.buildManifest({ topics: ["top"] }, BASE_URL);
+    expect(searchCatalogOf(m).name).toBe("Newsio");
+    expect(M.SEARCH_CATALOG_NAME).toBe("Newsio");
+  });
+
+  test("the search catalog marks search required so it is not a browsable shelf", () => {
+    const m = M.buildManifest({ topics: ["top"] }, BASE_URL);
+    expect(searchCatalogOf(m).extra).toEqual([{ name: "search", isRequired: true }, { name: "skip" }]);
+  });
+
+  test("the search catalog is appended once, after the topics", () => {
+    const m = M.buildManifest({ topics: ["top", "world"] }, BASE_URL);
+    expect(m.catalogs.map((c) => c.id)).toEqual(["top", "world", "search"]);
+  });
+
+  test("the search catalog id cannot collide with a topic id", () => {
+    expect(TOPICS.map((t) => t.id)).not.toContain(M.SEARCH_CATALOG_ID);
+  });
+
+  test("selecting every topic still yields exactly one search catalog", () => {
+    const m = M.buildManifest({ topics: TOPICS.map((t) => t.id) }, BASE_URL);
+    expect(m.catalogs).toHaveLength(TOPICS.length + 1);
+    expect(m.catalogs.filter((c) => c.id === M.SEARCH_CATALOG_ID)).toHaveLength(1);
   });
 
   test("with topics selected it no longer requires configuration", () => {
@@ -88,9 +135,14 @@ describe("configured manifest", () => {
   });
 
   test("silently drops unknown topic ids", () => {
-    expect(M.buildManifest({ topics: ["nope", "technology"] }, BASE_URL).catalogs.map((c) => c.id)).toEqual([
+    expect(topicCatalogs(M.buildManifest({ topics: ["nope", "technology"] }, BASE_URL)).map((c) => c.id)).toEqual([
       "technology"
     ]);
+  });
+
+  test("no catalogs at all -- not even search -- when nothing is configured", () => {
+    expect(M.buildManifest({ topics: [] }, BASE_URL).catalogs).toEqual([]);
+    expect(M.buildManifest({ topics: ["nope"] }, BASE_URL).catalogs).toEqual([]);
   });
 
   test("tolerates a missing/empty config object", () => {
@@ -147,10 +199,23 @@ describe("stremio-addons.net listing credential", () => {
 });
 
 describe("internal interface manifest", () => {
-  test("declares every topic so any topic id routes to the catalog handler", () => {
+  test("declares every topic plus search, so any catalog id routes to a handler", () => {
     const im = M.buildInterfaceManifest();
-    expect(im.catalogs).toHaveLength(TOPICS.length);
-    expect(im.catalogs.map((c) => c.id).sort()).toEqual(TOPICS.map((t) => t.id).sort());
+    expect(im.catalogs).toHaveLength(TOPICS.length + 1);
+    expect(im.catalogs.map((c) => c.id).sort()).toEqual(
+      [...TOPICS.map((t) => t.id), M.SEARCH_CATALOG_ID].sort()
+    );
+  });
+
+  // The SDK builds one static router at startup, so the internal manifest
+  // has to agree with what the served manifests advertise or a real request
+  // would 404 on a catalog the user can see.
+  test("internal search catalog matches the served one", () => {
+    const internal = M.buildInterfaceManifest().catalogs.find((c) => c.id === M.SEARCH_CATALOG_ID);
+    const served = M.buildManifest({ topics: ["top"] }, BASE_URL).catalogs.find(
+      (c) => c.id === M.SEARCH_CATALOG_ID
+    );
+    expect(internal).toEqual(served);
   });
 
   test("has a non-empty config array, which is what enables the SDK's :config route prefix", () => {

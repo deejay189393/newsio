@@ -15,15 +15,27 @@ function formatReleaseInfo(pubDate) {
 }
 
 /**
- * Prefix the description with "[VIDEO]" when the story has a real video
- * attached, so the user can tell at a glance -- in the catalog grid and on
- * the detail page -- whether pressing play will actually play something,
- * versus just opening the article in a browser.
+ * Marker shown on stories that carry a playable video.
+ *
+ * It belongs on the *name*, because the name is the only text a catalog
+ * grid puts under a poster. This used to prefix the description instead,
+ * which is not rendered in the grid at all -- so the marker was invisible
+ * at exactly the moment the user is choosing between "this plays" and
+ * "this opens an article in a browser".
+ *
+ * A single glyph rather than a word like [VIDEO]: clients truncate these
+ * titles hard (the grid shows about 30 characters), so every character
+ * spent on the marker is one taken from the headline.
  */
+const VIDEO_MARKER = "\u25b6";
+
+function buildName(article) {
+  return article.videoUrl ? `${VIDEO_MARKER} ${article.title}` : article.title;
+}
+
+/** The article summary. The video marker lives on the name, not here. */
 function buildDescription(article) {
-  const base = article.description || "";
-  if (article.videoUrl) return `[VIDEO] ${base}`.trim();
-  return base || undefined;
+  return article.description || undefined;
 }
 
 /** Compact metadata for one item in a catalog grid. */
@@ -31,7 +43,7 @@ function toMetaPreview(article) {
   return {
     id: article.id,
     type: CONTENT_TYPE,
-    name: article.title,
+    name: buildName(article),
     poster: article.image || FALLBACK_POSTER,
     posterShape: "landscape",
     background: article.image || FALLBACK_BACKGROUND,
@@ -46,7 +58,7 @@ function toFullMeta(article) {
   return {
     id: article.id,
     type: CONTENT_TYPE,
-    name: article.title,
+    name: buildName(article),
     poster: article.image || FALLBACK_POSTER,
     posterShape: "landscape",
     background: article.image || FALLBACK_BACKGROUND,
@@ -90,4 +102,4 @@ function toStreams(article) {
   return streams;
 }
 
-module.exports = { toMetaPreview, toFullMeta, toStreams, formatReleaseInfo, buildDescription };
+module.exports = { toMetaPreview, toFullMeta, toStreams, formatReleaseInfo, buildDescription, buildName, VIDEO_MARKER };

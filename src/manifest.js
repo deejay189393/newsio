@@ -11,8 +11,45 @@ const { TOPICS, getTopicById } = require("./topics");
 const CONTENT_TYPE = "news";
 
 const ADDON_ID = "org.deejay189393.newsio";
-const ADDON_VERSION = "0.1.0"; // initial release
+const ADDON_VERSION = "0.2.0";
 const CONTACT_EMAIL = "deejay189393@users.noreply.github.com";
+const DESCRIPTION = "News on Stremio? Why not! Uses the newsdata.io API.";
+
+/**
+ * Search is served by ONE catalog for the whole addon, not by every topic.
+ *
+ * A catalog that declares `search` in its `extra` becomes a separate row in
+ * the client's search results, so declaring it on each topic meant one
+ * identical result row per selected topic ("Top Stories - News",
+ * "Technology - News", ...) all running the same free-text query. Instead
+ * the topic catalogs are browse-only and this single catalog owns search,
+ * which is why it is named for the addon rather than a topic: clients label
+ * the row with the catalog name, so it reads "Newsio - News".
+ *
+ * `isRequired: true` on the search extra keeps it out of Discover/Home --
+ * it has nothing to show without a query, and would otherwise appear as an
+ * empty browsable shelf.
+ */
+const SEARCH_CATALOG_ID = "search";
+const SEARCH_CATALOG_NAME = "Newsio";
+
+function topicCatalog(topic) {
+  return {
+    type: CONTENT_TYPE,
+    id: topic.id,
+    name: topic.label,
+    extra: [{ name: "skip" }]
+  };
+}
+
+function searchCatalog() {
+  return {
+    type: CONTENT_TYPE,
+    id: SEARCH_CATALOG_ID,
+    name: SEARCH_CATALOG_NAME,
+    extra: [{ name: "search", isRequired: true }, { name: "skip" }]
+  };
+}
 
 /**
  * Optional listing credential for https://stremio-addons.net.
@@ -48,8 +85,7 @@ function baseManifest(baseUrl) {
     id: ADDON_ID,
     version: ADDON_VERSION,
     name: "Newsio",
-    description:
-      "Live news headlines from newsdata.io, organized into catalogs by topic and searchable from inside Stremio. Video stories play directly; text stories open the full article.",
+    description: DESCRIPTION,
     logo: `${baseUrl}/logo.png`,
     background: `${baseUrl}/background.png`,
     contactEmail: CONTACT_EMAIL,
@@ -81,19 +117,16 @@ function getUnconfiguredManifest(baseUrl) {
 function buildManifest(config, baseUrl) {
   const topics = ((config && config.topics) || []).map(getTopicById).filter(Boolean);
 
-  const catalogs = topics.map((topic) => ({
-    type: CONTENT_TYPE,
-    id: topic.id,
-    name: topic.label,
-    extra: [{ name: "search" }, { name: "skip" }]
-  }));
+  // The search catalog is only worth advertising alongside real topics: with
+  // nothing configured the addon is not installable anyway.
+  const catalogs = topics.length ? [...topics.map(topicCatalog), searchCatalog()] : [];
 
   return {
     ...baseManifest(baseUrl),
     catalogs,
     behaviorHints: {
       configurable: true,
-      configurationRequired: catalogs.length === 0
+      configurationRequired: topics.length === 0
     }
   };
 }
@@ -120,12 +153,7 @@ function buildInterfaceManifest() {
     resources: ["catalog", "meta", "stream"],
     types: [CONTENT_TYPE],
     idPrefixes: ["nd_"],
-    catalogs: TOPICS.map((topic) => ({
-      type: CONTENT_TYPE,
-      id: topic.id,
-      name: topic.label,
-      extra: [{ name: "search" }, { name: "skip" }]
-    })),
+    catalogs: [...TOPICS.map(topicCatalog), searchCatalog()],
     config: [{ key: "apiKey", type: "password", title: "newsdata.io API Key" }],
     behaviorHints: { configurable: true, configurationRequired: true }
   };
@@ -138,5 +166,8 @@ module.exports = {
   getStremioAddonsConfig,
   CONTENT_TYPE,
   ADDON_ID,
-  ADDON_VERSION
+  ADDON_VERSION,
+  DESCRIPTION,
+  SEARCH_CATALOG_ID,
+  SEARCH_CATALOG_NAME
 };

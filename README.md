@@ -13,16 +13,19 @@ real metadata for every story and a playable stream when the story has video.
 - **Your topics become your catalogs.** Pick Technology, Finance & Business,
   World, Sports, and so on; each selected topic appears in Stremio as its own
   catalog, named after the topic.
-- **Search works inside Stremio.** Every catalog declares the `search` extra, so
-  Stremio's search bar queries newsdata.io live rather than filtering a local list.
+- **One search catalog, named "Newsio".** A single catalog owns search for the
+  whole addon, so a query returns one result row -- labelled **Newsio** -- that
+  queries newsdata.io live across every category, rather than filtering a local
+  list. The topic catalogs are browse-only.
 - **Pagination.** Catalogs declare `skip`, and Newsio translates Stremio's
   numeric offset into newsdata.io's cursor-based paging (see *Pagination* below).
 - **Real metadata per item** — title, description, poster, backdrop, publish
   date, genre, source and author links — served from the addon's own `meta`
   handler.
-- **Video-aware streams.** If a story has a video, its description is prefixed
-  with **`[VIDEO]`** and the first stream plays that video. Every story also
-  offers a "read the article" link.
+- **Video stories are marked in the title.** A story with a playable video has
+  its headline prefixed with a **`▶`**, and its first stream plays that video.
+  The marker goes on the title because the title is the only text a catalog grid
+  shows under a poster. Every story also offers a "read the article" link.
 - **Re-configurable.** Stremio's *Configure* button reopens the setup page with
   your current key, language and topics pre-filled.
 
@@ -48,7 +51,8 @@ in search, the same as other non-video addons.
 | `GET /:config/configure` | Re-configuration, pre-filled from your current settings |
 | `GET /manifest.json` | Unconfigured manifest (tells Stremio setup is required) |
 | `GET /:config/manifest.json` | Your manifest: one catalog per selected topic |
-| `GET /:config/catalog/news/:topic/:extra?.json` | Headlines; handles `search` and `skip` |
+| `GET /:config/catalog/news/:topic/:extra?.json` | Headlines for one topic; handles `skip` |
+| `GET /:config/catalog/news/search/search=:q.json` | The addon-wide search catalog |
 | `GET /:config/meta/news/:id.json` | Full metadata for one story |
 | `GET /:config/stream/news/:id.json` | Video stream (if any) + article link |
 | `GET /health` | Health check used by Railway |
@@ -117,7 +121,7 @@ npm start           # http://localhost:3000/configure
 ```
 
 ```bash
-npm test            # 221 tests
+npm test            # 263 tests
 npm run test:coverage
 ```
 
@@ -161,13 +165,24 @@ Newsio reads that signature from `STREMIO_ADDONS_CONFIG_SIGNATURE` rather than
 hardcoding it, so the credential never lands in this public repo and claiming
 the addon needs no code change. To list it:
 
-1. Sign in at stremio-addons.net and open the addon's page (or submit the
-   manifest URL).
-2. Click **Claim** and copy the signature it issues.
-3. Set `STREMIO_ADDONS_CONFIG_SIGNATURE` to that value in your Railway service
-   variables and redeploy.
-4. The manifest now includes `stremioAddonsConfig`; finish verification on their
-   site.
+1. **Sign in** at [stremio-addons.net](https://stremio-addons.net) with your
+   Stremio account. The Claim link is only rendered for signed-in users.
+2. **Find the addon** in the catalog. If it is not listed yet, submit it first
+   at [/submit-addon](https://stremio-addons.net/submit-addon) using the
+   unconfigured manifest URL, `https://<your-host>/manifest.json` -- not a
+   configured one, since that carries your API key in the path.
+3. **Open the addon's page and click "Claim"** at the bottom, then follow the
+   ownership steps. The site issues a signature (a JWT bound to that manifest
+   URL).
+4. **Set `STREMIO_ADDONS_CONFIG_SIGNATURE`** to that value in your Railway
+   service variables. Railway restarts the service on a variable change, and
+   the manifest is built per request, so it takes effect immediately.
+5. **Confirm** with `curl https://<your-host>/manifest.json | grep stremioAddons`
+   and finish verification on their site.
+
+The badge only appears when both `issuer` and `signature` are present; the
+issuer defaults to `https://stremio-addons.net` and needs overriding only if
+they tell you to.
 
 The manifest already carries everything else a listing needs: a stable `id`,
 semver `version`, `name`, `description`, `logo`, `background` and `contactEmail`.
