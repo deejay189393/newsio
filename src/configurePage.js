@@ -68,7 +68,7 @@ function youtubePlaybackField(mode) {
         <label class="field source-option">
           <span class="label-text">When you press play</span>
           <select id="youtube-playback">
-            <option value="app"${appSelected}>Play in Newsio &mdash; best available quality</option>
+            <option value="app"${appSelected}>Play in-app</option>
             <option value="youtube"${ytSelected}>Open in the YouTube app</option>
           </select>
         </label>`;

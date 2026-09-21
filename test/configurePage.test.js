@@ -235,6 +235,12 @@ describe("the YouTube playback setting on the page", () => {
     expect(markup).not.toContain('<option value="app" selected>');
   });
 
+  test("the two choices read exactly as intended", () => {
+    const markup = render(null);
+    expect(markup).toContain(">Play in-app</option>");
+    expect(markup).toContain(">Open in the YouTube app</option>");
+  });
+
   test("it sits inside the YouTube card, where the key is entered", () => {
     const markup = render(null);
     const youtubeCard = markup.slice(markup.indexOf('data-provider="youtube"'));
