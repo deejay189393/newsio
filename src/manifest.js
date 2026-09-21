@@ -11,7 +11,7 @@ const { TOPICS, getTopicById } = require("./topics");
 const CONTENT_TYPE = "news";
 
 const ADDON_ID = "org.deejay189393.newsio";
-const ADDON_VERSION = "0.2.0";
+const ADDON_VERSION = "0.2.1";
 const CONTACT_EMAIL = "deejay189393@users.noreply.github.com";
 const DESCRIPTION = "News on Stremio? Why not! Uses the newsdata.io API.";
 
@@ -52,21 +52,31 @@ function searchCatalog() {
 }
 
 /**
- * Optional listing credential for https://stremio-addons.net.
+ * Listing credential for https://stremio-addons.net.
  *
- * When an addon is claimed there, the site issues a signature that must be
- * echoed back in the manifest as `stremioAddonsConfig` to prove ownership.
- * It is read from the environment rather than committed, so the public
- * repo carries no credential and claiming later needs no code change --
- * just set STREMIO_ADDONS_CONFIG_SIGNATURE (and optionally
- * STREMIO_ADDONS_CONFIG_ISSUER) on the deployment and restart.
+ * Claiming an addon there issues a signature that the manifest must echo
+ * back as `stremioAddonsConfig` to prove ownership. This one belongs to
+ * https://newsio.up.railway.app/manifest.json.
+ *
+ * It is committed rather than kept in the environment. It reads like a
+ * credential, but it is served verbatim to every client that fetches the
+ * manifest -- it is public by construction, so hiding it bought nothing
+ * while risking the verified badge silently vanishing if the variable were
+ * ever dropped. It is also bound to the manifest URL above, so it cannot be
+ * reused to claim a different addon.
+ *
+ * A fork deploying to its own host needs its own signature: override with
+ * STREMIO_ADDONS_CONFIG_SIGNATURE (and STREMIO_ADDONS_CONFIG_ISSUER) rather
+ * than editing this file, since this one will not validate for another URL.
  */
+const STREMIO_ADDONS_ISSUER = "https://stremio-addons.net";
+const STREMIO_ADDONS_SIGNATURE =
+  "eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..Z71i61P4KsKCep97-S7_SA.NCWCuO1Mr-1HydcNM0IAJEzFCKshMaeEPGJ0Vai4YtrqUeiuDXGajDRisu4CpDawYYPVIMJA7Ay8G-1KJijCOM0c-4OBAyFYinFCK_aQaBkvy49E_INGPuCHFPle8IST.f-bNhW5MzGrVuN-65LoHsg";
+
 function getStremioAddonsConfig() {
-  const signature = process.env.STREMIO_ADDONS_CONFIG_SIGNATURE;
-  if (!signature) return undefined;
   return {
-    issuer: process.env.STREMIO_ADDONS_CONFIG_ISSUER || "https://stremio-addons.net",
-    signature
+    issuer: process.env.STREMIO_ADDONS_CONFIG_ISSUER || STREMIO_ADDONS_ISSUER,
+    signature: process.env.STREMIO_ADDONS_CONFIG_SIGNATURE || STREMIO_ADDONS_SIGNATURE
   };
 }
 
@@ -79,8 +89,6 @@ function getStremioAddonsConfig() {
  * does on its own) rather than Stremio's bare-bones generated form.
  */
 function baseManifest(baseUrl) {
-  const addonsConfig = getStremioAddonsConfig();
-
   return {
     id: ADDON_ID,
     version: ADDON_VERSION,
@@ -97,7 +105,7 @@ function baseManifest(baseUrl) {
       configurable: true,
       configurationRequired: true
     },
-    ...(addonsConfig ? { stremioAddonsConfig: addonsConfig } : {})
+    stremioAddonsConfig: getStremioAddonsConfig()
   };
 }
 
@@ -169,5 +177,7 @@ module.exports = {
   ADDON_VERSION,
   DESCRIPTION,
   SEARCH_CATALOG_ID,
-  SEARCH_CATALOG_NAME
+  SEARCH_CATALOG_NAME,
+  STREMIO_ADDONS_ISSUER,
+  STREMIO_ADDONS_SIGNATURE
 };

@@ -121,7 +121,7 @@ npm start           # http://localhost:3000/configure
 ```
 
 ```bash
-npm test            # 263 tests
+npm test            # 270 tests
 npm run test:coverage
 ```
 
@@ -149,7 +149,7 @@ variables are required; `PORT` is injected by the platform.
 | Variable | Purpose |
 |---|---|
 | `PORT` | Port to bind (set automatically by Railway; defaults to 3000) |
-| `STREMIO_ADDONS_CONFIG_SIGNATURE` | Listing signature from stremio-addons.net (see below) |
+| `STREMIO_ADDONS_CONFIG_SIGNATURE` | Override the built-in stremio-addons.net signature (forks only; see below) |
 | `STREMIO_ADDONS_CONFIG_ISSUER` | Override the signature issuer (defaults to `https://stremio-addons.net`) |
 
 ## Listing on stremio-addons.net
@@ -161,28 +161,45 @@ the addon echo a signature back in its manifest, as `stremioAddonsConfig`:
 "stremioAddonsConfig": { "issuer": "https://stremio-addons.net", "signature": "..." }
 ```
 
-Newsio reads that signature from `STREMIO_ADDONS_CONFIG_SIGNATURE` rather than
-hardcoding it, so the credential never lands in this public repo and claiming
-the addon needs no code change. To list it:
+**This addon is already claimed.** The issued signature ships in
+`src/manifest.js` and is served on every manifest response, configured and
+unconfigured alike -- including the plain `/manifest.json` that the claim is
+bound to. Nothing needs to be set on the deployment.
+
+It is committed rather than kept in an environment variable on purpose. The
+token reads like a credential, but it is handed verbatim to every client that
+fetches the manifest, so it is public by construction: hiding it bought
+nothing, while leaving the verified badge to vanish silently if the variable
+were ever dropped. It is also bound to this addon's manifest URL, so it cannot
+be reused to claim a different one.
+
+Check it with:
+
+```bash
+curl -s https://newsio.up.railway.app/manifest.json | grep -o '"issuer":"[^"]*"'
+```
+
+### Claiming a fork
+
+The committed signature will **not** validate for another host, so a fork
+needs its own. Get one and override it from the environment rather than
+editing the file:
 
 1. **Sign in** at [stremio-addons.net](https://stremio-addons.net) with your
-   Stremio account. The Claim link is only rendered for signed-in users.
-2. **Find the addon** in the catalog. If it is not listed yet, submit it first
-   at [/submit-addon](https://stremio-addons.net/submit-addon) using the
+   Stremio account -- the Claim link only renders for signed-in users.
+2. **Find the addon** in the catalog. If it is not listed yet, submit it at
+   [/submit-addon](https://stremio-addons.net/submit-addon) using the
    unconfigured manifest URL, `https://<your-host>/manifest.json` -- not a
-   configured one, since that carries your API key in the path.
-3. **Open the addon's page and click "Claim"** at the bottom, then follow the
-   ownership steps. The site issues a signature (a JWT bound to that manifest
-   URL).
-4. **Set `STREMIO_ADDONS_CONFIG_SIGNATURE`** to that value in your Railway
-   service variables. Railway restarts the service on a variable change, and
-   the manifest is built per request, so it takes effect immediately.
-5. **Confirm** with `curl https://<your-host>/manifest.json | grep stremioAddons`
-   and finish verification on their site.
+   configured one, since that carries an API key in the path.
+3. **Click "Claim"** at the bottom of the addon's page and follow the
+   ownership steps. The site issues a signature bound to that manifest URL.
+4. **Set `STREMIO_ADDONS_CONFIG_SIGNATURE`** to it in your host's variables.
+   Railway restarts on a variable change and the manifest is built per
+   request, so it takes effect immediately -- no redeploy.
+5. **Confirm** with the `curl` above and finish verification on their site.
 
-The badge only appears when both `issuer` and `signature` are present; the
-issuer defaults to `https://stremio-addons.net` and needs overriding only if
-they tell you to.
+`STREMIO_ADDONS_CONFIG_ISSUER` overrides the issuer, which defaults to
+`https://stremio-addons.net` and only needs changing if they tell you to.
 
 The manifest already carries everything else a listing needs: a stable `id`,
 semver `version`, `name`, `description`, `logo`, `background` and `contactEmail`.
