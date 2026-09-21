@@ -658,14 +658,14 @@ describe("revealing an API key", () => {
   });
 
   test("the button reports its state, which is also what swaps the icon", () => {
-    // The open and struck-through glyphs both ship in the markup; CSS picks
-    // one off aria-pressed, so the icon can never drift from the field.
+    // The slash is always in the markup; CSS shows it off aria-pressed, so
+    // the icon can never drift out of step with the field.
     const page = loadPage();
     const toggle = toggleFor(page, "youtube");
     expect(toggle.getAttribute("aria-pressed")).toBe("false");
     expect(toggle.getAttribute("title")).toBe("Show key");
-    expect(toggle.querySelector(".eye-open")).not.toBeNull();
-    expect(toggle.querySelector(".eye-shut")).not.toBeNull();
+    expect(toggle.querySelectorAll("svg")).toHaveLength(1);
+    expect(toggle.querySelector(".eye-slash")).not.toBeNull();
 
     toggle.click();
     expect(toggle.getAttribute("aria-pressed")).toBe("true");
