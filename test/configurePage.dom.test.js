@@ -155,7 +155,8 @@ describe("configure page — Generate install link", () => {
         { kind: "preset", id: "technology", label: "Technology" },
         { kind: "preset", id: "world", label: "World" }
       ],
-      language: "en"
+      language: "en",
+      youtubePlayback: "app"
     });
   });
 
@@ -356,9 +357,10 @@ describe("configure page — the failover chain", () => {
     page.setKey("newsdata", "n1");
     page.check("top");
 
-    expect(page.cardOrder()[0]).toBe("currents");
+    // YouTube heads the default chain, so the pair under test sits at 1..2.
+    expect(page.cardOrder().slice(0, 3)).toEqual(["youtube", "currents", "newsdata"]);
     page.click('.source[data-provider="newsdata"] .move-up');
-    expect(page.cardOrder().slice(0, 2)).toEqual(["newsdata", "currents"]);
+    expect(page.cardOrder().slice(1, 3)).toEqual(["newsdata", "currents"]);
 
     page.submit();
     const url = page.document.getElementById("manifest-url").value;
@@ -372,7 +374,7 @@ describe("configure page — the failover chain", () => {
     page.setKey("newsdata", "n1");
     page.check("top");
     page.click('.source[data-provider="currents"] .move-down');
-    expect(page.cardOrder().slice(0, 2)).toEqual(["newsdata", "currents"]);
+    expect(page.cardOrder().slice(1, 3)).toEqual(["newsdata", "currents"]);
   });
 
   test("the first card cannot move up, nor the last down", () => {
@@ -407,14 +409,14 @@ describe("configure page — the failover chain", () => {
   // user with a gap in the list would misread their own priority order.
   test("rank badges count only the sources that have a key", () => {
     const page = loadPage();
-    // Card order is the default chain: currents, newsdata, youtube, gnews.
+    // Card order is the default chain: youtube, currents, newsdata, gnews.
     expect(page.ranks()).toEqual(["-", "-", "-", "-"]);
     page.setKey("newsdata", "n1");
-    expect(page.ranks()).toEqual(["-", "1", "-", "-"]);
+    expect(page.ranks()).toEqual(["-", "-", "1", "-"]);
     page.setKey("gnews", "g1");
-    expect(page.ranks()).toEqual(["-", "1", "-", "2"]);
+    expect(page.ranks()).toEqual(["-", "-", "1", "2"]);
     page.setKey("currents", "c1");
-    expect(page.ranks()).toEqual(["1", "2", "-", "3"]);
+    expect(page.ranks()).toEqual(["-", "1", "2", "3"]);
   });
 
   test("a filled source is visibly marked as active", () => {

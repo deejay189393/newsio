@@ -690,22 +690,38 @@ describe("a YouTube story offers both ways to watch it", () => {
     provider: "youtube"
   };
 
-  test("one stream, pointing at this addon's own /yt endpoint", () => {
-    // Both of the previous rows were dead in Nuvio: it resolves a stream
-    // through `url` and `externalUrl` only, so the `ytId` row did nothing
-    // at all when tapped, and the `externalUrl` row left the player for
-    // the YouTube app. A real media URL is the only thing that plays.
+  test("in-app playback points at our DASH manifest, which is where the quality is", () => {
+    // `ytId` was dead in Nuvio: it resolves a stream through `url` and
+    // `externalUrl` only, so that row did nothing at all when tapped. And
+    // the manifest rather than the .mp4 because the muxed file tops out at
+    // 360p -- 1080p only exists as separate video and audio files.
     const streams = toStreams(ytArticle, { baseUrl: "https://newsio.up.railway.app" });
-    expect(streams).toHaveLength(1);
-    expect(streams[0].url).toBe("https://newsio.up.railway.app/yt/dQw4w9WgXcQ.mp4");
+    expect(streams).toHaveLength(2);
+    expect(streams[0].url).toBe("https://newsio.up.railway.app/yt/dQw4w9WgXcQ/manifest.mpd");
     expect(streams[0].ytId).toBeUndefined();
-    expect(streams[0].externalUrl).toBeUndefined();
-    expect(streams[0].title).toBe("Play video (Reuters)");
+    expect(streams[0].title).toBe("Play video in app (Reuters)");
+    expect(streams[1].externalUrl).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+    expect(streams[1].title).toBe("Open in YouTube app (Reuters)");
+  });
+
+  test("the order is the user's choice, so a break in playback is reconfigurable", () => {
+    const flipped = toStreams(ytArticle, {
+      baseUrl: "https://newsio.up.railway.app",
+      youtubePlayback: "youtube"
+    });
+    expect(flipped[0].title).toBe("Open in YouTube app (Reuters)");
+    expect(flipped[1].title).toBe("Play video in app (Reuters)");
+  });
+
+  test("in-app leads unless the user said otherwise", () => {
+    const base = { baseUrl: "https://newsio.up.railway.app" };
+    expect(toStreams(ytArticle, base)[0].url).toBeTruthy();
+    expect(toStreams(ytArticle, { ...base, youtubePlayback: "app" })[0].url).toBeTruthy();
   });
 
   test("the URL follows the host being served, so beta never points at production", () => {
     const beta = toStreams(ytArticle, { baseUrl: "https://newsio-beta.up.railway.app" });
-    expect(beta[0].url).toBe("https://newsio-beta.up.railway.app/yt/dQw4w9WgXcQ.mp4");
+    expect(beta[0].url).toBe("https://newsio-beta.up.railway.app/yt/dQw4w9WgXcQ/manifest.mpd");
   });
 
   test("without a known host it falls back rather than emitting a relative URL", () => {

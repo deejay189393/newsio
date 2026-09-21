@@ -14,8 +14,8 @@ const ok = (data) => ({ ok: true, json: async () => data });
 const fail = (status, body) => ({ ok: false, status, json: async () => body });
 
 describe("the registry", () => {
-  test("offers the providers freshest-first", () => {
-    expect(registry.PROVIDERS.map((p) => p.id)).toEqual(["currents", "newsdata", "youtube", "gnews"]);
+  test("offers YouTube first, then the text APIs freshest-first", () => {
+    expect(registry.PROVIDERS.map((p) => p.id)).toEqual(["youtube", "currents", "newsdata", "gnews"]);
   });
 
   test("every provider satisfies the same interface", () => {

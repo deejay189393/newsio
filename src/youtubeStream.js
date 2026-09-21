@@ -1,21 +1,27 @@
 /**
- * Resolving a YouTube video id to a media URL the player can open.
+ * Resolving a YouTube video id to something Nuvio's player can open.
  *
- * Why this exists at all: the addon protocol has a `ytId` field, and the
- * manifest says it "plays using the built-in YouTube player". Nuvio parses
- * it -- its Stream model has the field and even an `isYouTube()` helper --
- * but nothing acts on it. Its `getStreamUrl()` reads `url` and
- * `externalUrl` only, so a `ytId` stream resolves to nothing and tapping it
- * does nothing at all. Nuvio *can* play YouTube (its trailers do), but that
- * runs through a separate in-app extractor the addon stream path never
- * reaches. So the addon has to hand over a real media URL.
+ * Why this exists: the addon protocol has a `ytId` field, and the manifest
+ * says it "plays using the built-in YouTube player". Nuvio parses it -- its
+ * Stream model has the field and even an `isYouTube()` helper -- but nothing
+ * acts on it. `getStreamUrl()` reads `url` and `externalUrl` only, and the
+ * player path never special-cases a YouTube URL anywhere. Nuvio *can* play
+ * YouTube, but only through `InAppYouTubeExtractor`, which is wired into
+ * `TrailerService` alone and which no addon stream can reach. So there is no
+ * stream shape that makes the app resolve a video id by itself; the addon has
+ * to hand over real media.
  *
- * The approach mirrors that same in-app extractor: ask YouTube's InnerTube
- * player endpoint, pretending to be a first-party client. The Android
- * client is the one that matters here, because it is the only one that
- * still returns a *progressive* format -- itag 18, H.264 360p with the
- * audio muxed in. Every higher quality YouTube offers is adaptive: video
- * and audio as separate files, which a single stream URL cannot express.
+ * Two shapes come out of here, and the difference is the whole quality story:
+ *
+ *   - a *progressive* file (itag 18, H.264 360p, audio muxed in). One URL,
+ *     plays anywhere, and 360p is the ceiling -- it is the only muxed format
+ *     YouTube still publishes.
+ *
+ *   - a *DASH manifest* we generate, listing the adaptive formats. Adaptive
+ *     means video and audio arrive as separate files, which one stream URL
+ *     cannot express -- but a manifest can, and that is where 1080p lives.
+ *     Every field the manifest needs (initRange, indexRange, codecs,
+ *     dimensions) is in the player response already.
  *
  * The watch page is fetched first for its InnerTube API key and visitor id.
  * Skipping that works for a while and then starts coming back
@@ -33,9 +39,9 @@ const VISITOR_DATA_RE = /"VISITOR_DATA":"([^"]+)"/;
 const VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
 
 /**
- * The client whose player response still carries a muxed format. Its
- * version string is part of what YouTube matches on, so it is kept
- * together with the user agent rather than scattered.
+ * The client whose player response still carries a muxed format, and whose
+ * URLs arrive unciphered. Its version string is part of what YouTube matches
+ * on, so it is kept together with the user agent rather than scattered.
  */
 const ANDROID_CLIENT = {
   name: "ANDROID",
@@ -59,6 +65,17 @@ const WATCH_CONFIG_TTL_MS = 30 * 60 * 1000;
 /** How long before a URL's own expiry we stop handing it out. */
 const EXPIRY_MARGIN_MS = 5 * 60 * 1000;
 
+/**
+ * H.264 video and AAC audio only.
+ *
+ * YouTube also offers VP9 and AV1 at the same resolutions, often at a lower
+ * bitrate, but television decoders are far less consistent about them and a
+ * format the TV cannot decode in hardware is worse than one a notch smaller.
+ * H.264 plus AAC is the pairing every Android TV decodes.
+ */
+const VIDEO_CODEC_RE = /^avc1/;
+const AUDIO_CODEC_RE = /^mp4a/;
+
 function fail(message, status) {
   const err = new Error(message);
   err.status = status;
@@ -69,8 +86,8 @@ function fail(message, status) {
  * The InnerTube key and visitor id, scraped from a watch page.
  *
  * Cached, because it is per-session rather than per-video: fetching a full
- * HTML page before every playback would double the latency of pressing
- * play for no benefit.
+ * HTML page before every playback would double the latency of pressing play
+ * for no benefit.
  */
 async function getWatchConfig(fetchImpl) {
   const cached = catalogCache.get(WATCH_CONFIG_KEY);
@@ -137,15 +154,17 @@ function expiryOf(mediaUrl) {
   }
 }
 
+const codecsOf = (mimeType) => {
+  const match = /codecs="([^"]+)"/.exec(mimeType || "");
+  return match ? match[1] : "";
+};
+
 /**
- * Pick the muxed format.
+ * Pick the muxed format: one file carrying both picture and sound.
  *
- * `streamingData.formats` is the progressive list; `adaptiveFormats` is
- * deliberately ignored, since an adaptive entry is video *or* audio and
- * handing the player one of those gives a silent picture or a black screen
- * with sound. A format carrying `signatureCipher` instead of `url` needs
- * JavaScript from the page deciphered to unlock it, which is not worth
- * doing when the Android client hands over a plain URL.
+ * A format carrying `signatureCipher` instead of `url` needs JavaScript from
+ * the page deciphered to unlock it, which is not worth doing when the Android
+ * client hands over a plain URL.
  */
 function pickProgressive(playerResponse) {
   const streaming = (playerResponse && playerResponse.streamingData) || {};
@@ -157,15 +176,129 @@ function pickProgressive(playerResponse) {
   );
 }
 
+/**
+ * The adaptive formats worth putting in a manifest: an H.264 ladder the
+ * player can move up and down, and the single best AAC track.
+ *
+ * Only formats carrying every byte range the manifest needs are kept -- a
+ * Representation without its index and initialisation ranges is one the
+ * player cannot start.
+ */
+function pickAdaptive(playerResponse) {
+  const streaming = (playerResponse && playerResponse.streamingData) || {};
+  const all = Array.isArray(streaming.adaptiveFormats) ? streaming.adaptiveFormats : [];
+
+  // Height and bitrate are normalised here, once, so that everything
+  // downstream -- the sorts and the manifest alike -- can treat them as
+  // plain numbers rather than repeating the same guard at each use.
+  const usable = all
+    .filter((f) => f && typeof f.url === "string" && f.initRange && f.indexRange && f.contentLength)
+    .map((f) => ({ ...f, height: Number(f.height) || 0, bitrate: Number(f.bitrate) || 0 }));
+
+  const video = usable
+    .filter((f) => (f.mimeType || "").startsWith("video/") && VIDEO_CODEC_RE.test(codecsOf(f.mimeType)))
+    .sort((a, b) => b.height - a.height || b.bitrate - a.bitrate);
+
+  // One representation per resolution; YouTube lists several encodes of the
+  // same height and a manifest offering duplicates just confuses the picker.
+  const byHeight = new Map();
+  video.forEach((f) => {
+    if (!byHeight.has(f.height)) byHeight.set(f.height, f);
+  });
+
+  const audio = usable
+    .filter((f) => (f.mimeType || "").startsWith("audio/") && AUDIO_CODEC_RE.test(codecsOf(f.mimeType)))
+    .sort((a, b) => b.bitrate - a.bitrate)[0];
+
+  return { video: [...byHeight.values()], audio: audio || null };
+}
+
+/** Seconds as an ISO 8601 duration, which is what MPD durations are. */
+const isoDuration = (seconds) => `PT${Math.max(0, Number(seconds) || 0).toFixed(3)}S`;
+
+const xmlEscape = (value) =>
+  String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+function representation(format, baseUrl, extra, inner = "") {
+  return [
+    `      <Representation id="${format.itag}" codecs="${xmlEscape(codecsOf(format.mimeType))}"`,
+    ` bandwidth="${Math.round(format.bitrate) || 0}"${extra} startWithSAP="1">`,
+    inner,
+    `\n        <BaseURL>${xmlEscape(`${baseUrl}/${format.itag}`)}</BaseURL>`,
+    `\n        <SegmentBase indexRange="${format.indexRange.start}-${format.indexRange.end}">`,
+    `\n          <Initialization range="${format.initRange.start}-${format.initRange.end}"/>`,
+    `\n        </SegmentBase>`,
+    `\n      </Representation>`
+  ].join("");
+}
+
+/**
+ * A DASH manifest over the adaptive formats.
+ *
+ * `SegmentBase` with explicit byte ranges is the on-demand DASH profile: the
+ * player reads the initialisation segment and the index, then issues ranged
+ * requests for the rest. Every one of those goes to our own proxy, because
+ * the underlying URLs are IP-locked to whoever resolved them.
+ */
+function buildDashManifest({ video, audio, durationSeconds, baseUrl }) {
+  const sets = [];
+
+  if (video.length) {
+    sets.push(
+      [
+        '    <AdaptationSet contentType="video" mimeType="video/mp4" subsegmentAlignment="true"',
+        ' subsegmentStartsWithSAP="1">\n',
+        video
+          .map((f) =>
+            representation(
+              f,
+              baseUrl,
+              ` width="${f.width}" height="${f.height}" frameRate="${Math.round(f.fps || 30)}"`
+            )
+          )
+          .join("\n"),
+        "\n    </AdaptationSet>"
+      ].join("")
+    );
+  }
+
+  if (audio) {
+    sets.push(
+      [
+        '    <AdaptationSet contentType="audio" mimeType="audio/mp4" subsegmentAlignment="true"',
+        ' subsegmentStartsWithSAP="1" lang="und">\n',
+        representation(
+          audio,
+          baseUrl,
+          ` audioSamplingRate="${audio.audioSampleRate || 44100}"`,
+          '\n        <AudioChannelConfiguration' +
+            ' schemeIdUri="urn:mpeg:dash:23003:3:audio_channel_configuration:2011" value="2"/>'
+        ),
+        "\n    </AdaptationSet>"
+      ].join("")
+    );
+  }
+
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" profiles="urn:mpeg:dash:profile:isoff-on-demand:2011"',
+    ` type="static" mediaPresentationDuration="${isoDuration(durationSeconds)}" minBufferTime="PT1.5S">`,
+    "\n  <Period>\n",
+    sets.join("\n"),
+    "\n  </Period>\n</MPD>\n"
+  ].join("");
+}
+
 const cacheKey = (videoId) => `youtube::media::${videoId}`;
 
 /**
- * Resolve one video id to a playable media URL.
+ * Everything needed to play one video: the muxed fallback, the adaptive
+ * ladder, and how long the whole thing runs.
  *
- * The result is cached until shortly before the URL's own expiry, so
- * pressing play on the same story twice does not re-scrape anything.
+ * Cached until shortly before the URLs' own expiry, so pressing play on the
+ * same story twice does not re-scrape anything.
  */
-async function resolveMediaUrl(videoId, { fetchImpl = fetch } = {}) {
+async function resolveVideo(videoId, { fetchImpl = fetch } = {}) {
   if (typeof videoId !== "string" || !VIDEO_ID_RE.test(videoId)) {
     throw fail("Not a YouTube video id", 400);
   }
@@ -186,30 +319,54 @@ async function resolveMediaUrl(videoId, { fetchImpl = fetch } = {}) {
     throw fail(`YouTube will not serve this video: ${reason}`, 403);
   }
 
-  const format = pickProgressive(player);
-  if (!format) throw fail("No single-file format available for this video", 415);
+  const progressive = pickProgressive(player);
+  const adaptive = pickAdaptive(player);
+  if (!progressive && !adaptive.video.length) {
+    throw fail("No playable format available for this video", 415);
+  }
+
+  const details = player.videoDetails || {};
+  const byItag = new Map();
+  [...adaptive.video, ...(adaptive.audio ? [adaptive.audio] : []), ...(progressive ? [progressive] : [])].forEach(
+    (f) => byItag.set(String(f.itag), { url: f.url, mimeType: f.mimeType.split(";")[0] })
+  );
 
   const resolved = {
-    url: format.url,
-    // Guaranteed present and video/* by pickProgressive; codecs stripped.
-    mimeType: format.mimeType.split(";")[0],
-    contentLength: Number(format.contentLength) || null,
-    quality: format.qualityLabel || null,
-    itag: format.itag
+    progressive: progressive
+      ? {
+          itag: progressive.itag,
+          url: progressive.url,
+          mimeType: progressive.mimeType.split(";")[0],
+          contentLength: Number(progressive.contentLength) || null,
+          quality: progressive.qualityLabel || null
+        }
+      : null,
+    adaptive,
+    byItag,
+    durationSeconds: Number(details.lengthSeconds) || 0,
+    // What the manifest will actually offer, for the stream's label.
+    bestQuality: adaptive.video.length
+      ? adaptive.video[0].qualityLabel || `${adaptive.video[0].height}p`
+      : progressive && progressive.qualityLabel
   };
 
-  const expires = expiryOf(format.url);
+  const anyUrl = (adaptive.video[0] || progressive).url;
+  const expires = expiryOf(anyUrl);
   const ttl = expires ? expires - Date.now() - EXPIRY_MARGIN_MS : 0;
   if (ttl > 0) catalogCache.set(cacheKey(videoId), resolved, ttl);
   return resolved;
 }
 
 module.exports = {
-  resolveMediaUrl,
+  resolveVideo,
   getWatchConfig,
   fetchPlayerResponse,
   pickProgressive,
+  pickAdaptive,
+  buildDashManifest,
   expiryOf,
+  codecsOf,
+  isoDuration,
   ANDROID_CLIENT,
   VIDEO_ID_RE,
   WATCH_CONFIG_KEY,
