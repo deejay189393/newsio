@@ -3,6 +3,31 @@ const { encodeConfig, decodeConfig, normalizeSources, isConfigured, unusedProvid
 const CUR = { provider: "currents", apiKey: "cur-key" };
 const ND = { provider: "newsdata", apiKey: "nd-key" };
 
+describe("the YouTube playback setting", () => {
+  const { validYoutubePlayback, DEFAULT_YOUTUBE_PLAYBACK } = require("../src/config");
+
+  test("defaults to playing in the app", () => {
+    // In-app playback is what almost everyone wants; the setting exists so
+    // that a break in it can be worked around without a code change.
+    expect(DEFAULT_YOUTUBE_PLAYBACK).toBe("app");
+    expect(validYoutubePlayback(undefined)).toBe("app");
+  });
+
+  test("both modes are accepted", () => {
+    expect(validYoutubePlayback("app")).toBe("app");
+    expect(validYoutubePlayback("youtube")).toBe("youtube");
+  });
+
+  test.each([["nonsense"], [""], [null], [42], [{}]])("%p falls back to the default", (mode) => {
+    expect(validYoutubePlayback(mode)).toBe("app");
+  });
+
+  test("it survives the round trip", () => {
+    const back = decodeConfig(encodeConfig({ sources: [CUR], topics: ["top"], youtubePlayback: "youtube" }));
+    expect(back.youtubePlayback).toBe("youtube");
+  });
+});
+
 describe("encode / decode round trip", () => {
   test("a normal config survives intact", () => {
     const cfg = { sources: [CUR, ND], topics: ["technology", "top"], language: "fr" };
@@ -12,7 +37,8 @@ describe("encode / decode round trip", () => {
         { kind: "preset", id: "technology", label: "Technology" },
         { kind: "preset", id: "top", label: "Top Stories" }
       ],
-      language: "fr"
+      language: "fr",
+      youtubePlayback: "app"
     });
   });
 
@@ -40,12 +66,18 @@ describe("encode / decode round trip", () => {
     expect(decodeConfig('{"sources":[{"provider":"currents","apiKey":"100%"}],"topics":["top"]}')).toEqual({
       sources: [{ provider: "currents", apiKey: "100%" }],
       topics: [{ kind: "preset", id: "top", label: "Top Stories" }],
-      language: "en"
+      language: "en",
+      youtubePlayback: "app"
     });
   });
 
   test("applies defaults to a sparse object", () => {
-    expect(decodeConfig(encodeConfig({}))).toEqual({ sources: [], topics: [], language: "en" });
+    expect(decodeConfig(encodeConfig({}))).toEqual({
+      sources: [],
+      topics: [],
+      language: "en",
+      youtubePlayback: "app"
+    });
   });
 });
 
@@ -144,13 +176,13 @@ describe("isConfigured", () => {
 
 describe("unusedProviders", () => {
   test("lists what the user has not configured yet", () => {
-    expect(unusedProviders({ sources: [CUR] }).map((p) => p.id)).toEqual(["newsdata", "youtube", "gnews"]);
+    expect(unusedProviders({ sources: [CUR] }).map((p) => p.id)).toEqual(["youtube", "newsdata", "gnews"]);
     expect(unusedProviders({ sources: [CUR, ND] }).map((p) => p.id)).toEqual(["youtube", "gnews"]);
   });
 
   test("lists everything when nothing is configured", () => {
-    expect(unusedProviders({}).map((p) => p.id)).toEqual(["currents", "newsdata", "youtube", "gnews"]);
-    expect(unusedProviders(null).map((p) => p.id)).toEqual(["currents", "newsdata", "youtube", "gnews"]);
+    expect(unusedProviders({}).map((p) => p.id)).toEqual(["youtube", "currents", "newsdata", "gnews"]);
+    expect(unusedProviders(null).map((p) => p.id)).toEqual(["youtube", "currents", "newsdata", "gnews"]);
   });
 });
 

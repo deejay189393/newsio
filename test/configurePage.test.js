@@ -185,28 +185,28 @@ describe("renderConfigurePage — re-configuration", () => {
 describe("orderedProviders — the saved failover order is shown back", () => {
   test("saved sources come first, in their order", () => {
     const existing = { sources: [{ provider: "gnews", apiKey: "g" }, { provider: "newsdata", apiKey: "n" }] };
-    expect(orderedProviders(existing).map((p) => p.id)).toEqual(["gnews", "newsdata", "currents", "youtube"]);
+    expect(orderedProviders(existing).map((p) => p.id)).toEqual(["gnews", "newsdata", "youtube", "currents"]);
   });
 
   test("unconfigured providers follow, in the default order", () => {
     expect(orderedProviders({ sources: [{ provider: "newsdata", apiKey: "n" }] }).map((p) => p.id)).toEqual([
       "newsdata",
-      "currents",
       "youtube",
+      "currents",
       "gnews"
     ]);
   });
 
   test("with nothing saved the default order stands", () => {
-    expect(orderedProviders(null).map((p) => p.id)).toEqual(["currents", "newsdata", "youtube", "gnews"]);
-    expect(orderedProviders({}).map((p) => p.id)).toEqual(["currents", "newsdata", "youtube", "gnews"]);
+    expect(orderedProviders(null).map((p) => p.id)).toEqual(["youtube", "currents", "newsdata", "gnews"]);
+    expect(orderedProviders({}).map((p) => p.id)).toEqual(["youtube", "currents", "newsdata", "gnews"]);
   });
 
   test("an unknown saved provider is ignored rather than crashing the page", () => {
     expect(orderedProviders({ sources: [{ provider: "nope", apiKey: "x" }] }).map((p) => p.id)).toEqual([
+      "youtube",
       "currents",
       "newsdata",
-      "youtube",
       "gnews"
     ]);
   });
@@ -215,6 +215,57 @@ describe("orderedProviders — the saved failover order is shown back", () => {
     const existing = { sources: [{ provider: "gnews", apiKey: "g" }], topics: [], language: "en" };
     const markup = renderConfigurePage({ baseUrl: BASE, existing });
     const order = [...markup.matchAll(/data-provider="([a-z]+)"/g)].map((m) => m[1]);
-    expect(order).toEqual(["gnews", "currents", "newsdata", "youtube"]);
+    expect(order).toEqual(["gnews", "youtube", "currents", "newsdata"]);
+  });
+});
+
+
+describe("the YouTube playback setting on the page", () => {
+  const render = (existing) => renderConfigurePage({ baseUrl: BASE, existing });
+
+  test("defaults to playing in the app", () => {
+    const markup = render(null);
+    expect(markup).toContain('<option value="app" selected>');
+    expect(markup).not.toContain('<option value="youtube" selected>');
+  });
+
+  test("a saved preference is shown back on reconfigure", () => {
+    const markup = render({ sources: [], topics: [], language: "en", youtubePlayback: "youtube" });
+    expect(markup).toContain('<option value="youtube" selected>');
+    expect(markup).not.toContain('<option value="app" selected>');
+  });
+
+  test("it sits inside the YouTube card, where the key is entered", () => {
+    const markup = render(null);
+    const youtubeCard = markup.slice(markup.indexOf('data-provider="youtube"'));
+    const nextCard = youtubeCard.indexOf('data-provider="', 1);
+    expect(youtubeCard.slice(0, nextCard)).toContain('id="youtube-playback"');
+  });
+
+  test("only the YouTube card has one", () => {
+    expect((render(null).match(/id="youtube-playback"/g) || []).length).toBe(1);
+  });
+});
+
+describe("API keys can be revealed", () => {
+  test("every key field has a show/hide toggle", () => {
+    // So a key can be read back and copied when reconfiguring.
+    const markup = renderConfigurePage({ baseUrl: BASE, existing: null });
+    const providers = (markup.match(/data-provider="/g) || []).length;
+    expect((markup.match(/class="key-toggle"/g) || []).length).toBe(providers);
+  });
+
+  test("the field still starts masked", () => {
+    const markup = renderConfigurePage({ baseUrl: BASE, existing: null });
+    expect(markup).toContain('type="password" class="source-key"');
+    expect(markup).toContain('aria-pressed="false"');
+  });
+
+  test("a saved key is present in the field so it can be copied", () => {
+    const markup = renderConfigurePage({
+      baseUrl: BASE,
+      existing: { sources: [{ provider: "youtube", apiKey: "AIzaSECRET" }], topics: [], language: "en" }
+    });
+    expect(markup).toContain('value="AIzaSECRET"');
   });
 });

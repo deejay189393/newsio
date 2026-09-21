@@ -5,10 +5,12 @@ const youtube = require("./youtube");
 
 /**
  * Every news API the addon can read from, in the order they are offered on
- * the configure page: freshest first, because that is the order most users
- * should run them in.
+ * the configure page, which is also the default failover order.
+ *
+ * YouTube leads: every story it serves is a playable video, which is the
+ * thing this addon is actually for. The text APIs follow it freshest-first.
  */
-const PROVIDERS = [currents, newsdata, youtube, gnews];
+const PROVIDERS = [youtube, currents, newsdata, gnews];
 const PROVIDERS_BY_ID = new Map(PROVIDERS.map((p) => [p.id, p]));
 
 /**

@@ -84,7 +84,13 @@ function createAddonInterface() {
   builder.defineStreamHandler(async ({ id, config }) => {
     const article = await getArticle(safeSources(config), id);
     if (!article) return { streams: [] };
-    return { streams: toStreams(article, { baseUrl: currentBaseUrl() }), cacheMaxAge: 3600 };
+    return {
+      streams: toStreams(article, {
+        baseUrl: currentBaseUrl(),
+        youtubePlayback: config && config.youtubePlayback
+      }),
+      cacheMaxAge: 3600
+    };
   });
 
   return builder.getInterface();

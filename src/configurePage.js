@@ -1,5 +1,6 @@
 const { LANGUAGES, PROVIDERS } = require("./providers");
 const { PRESET_TOPICS, normalizeTopics, MAX_CUSTOM_TOPICS, MAX_QUERY_LENGTH } = require("./topics");
+const { validYoutubePlayback } = require("./config");
 
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({
@@ -50,11 +51,32 @@ function orderedProviders(existing) {
  * the topic checkboxes so the user edits their current setup rather than
  * starting over.
  */
+/**
+ * Which YouTube stream sits on the play button.
+ *
+ * Offered because in-app playback leans on an undocumented YouTube API: if
+ * that breaks, the user can reconfigure to hand off to the YouTube app
+ * rather than wait for a fix.
+ */
+function youtubePlaybackField(mode) {
+  const appSelected = mode === "youtube" ? "" : " selected";
+  const ytSelected = mode === "youtube" ? " selected" : "";
+  return `
+        <label class="field source-option">
+          <span class="label-text">When you press play</span>
+          <select id="youtube-playback">
+            <option value="app"${appSelected}>Play in Newsio &mdash; best available quality</option>
+            <option value="youtube"${ytSelected}>Open in the YouTube app</option>
+          </select>
+        </label>`;
+}
+
 function renderConfigurePage({ baseUrl, existing }) {
   const selectedTopics = normalizeTopics((existing && existing.topics) || []);
   const language = (existing && existing.language) || "en";
   const isReconfigure = Boolean(existing);
   const savedKeys = new Map(((existing && existing.sources) || []).map((s) => [s.provider, s.apiKey]));
+  const youtubePlayback = validYoutubePlayback(existing && existing.youtubePlayback);
 
   const sourceCards = orderedProviders(existing)
     .map((provider) => {
@@ -74,7 +96,10 @@ function renderConfigurePage({ baseUrl, existing }) {
           </div>
         </div>
         <p class="source-note">${escapeHtml(provider.notes)}</p>
-        <input type="password" class="source-key" placeholder="${escapeHtml(provider.keyPlaceholder)}" value="${escapeHtml(key)}" aria-label="${escapeHtml(provider.label)} key" />
+        <div class="key-row">
+          <input type="password" class="source-key" placeholder="${escapeHtml(provider.keyPlaceholder)}" value="${escapeHtml(key)}" aria-label="${escapeHtml(provider.label)} key" />
+          <button type="button" class="key-toggle" title="Show key" aria-label="Show ${escapeHtml(provider.label)} key" aria-pressed="false">&#128065;</button>
+        </div>${provider.id === "youtube" ? youtubePlaybackField(youtubePlayback) : ""}
         <div class="source-links"><a href="${escapeHtml(provider.signupUrl)}" target="_blank" rel="noopener">Get a free ${escapeHtml(provider.label)} key</a></div>
       </div>`;
     })
@@ -122,6 +147,16 @@ function renderConfigurePage({ baseUrl, existing }) {
     padding: 11px 12px; border-radius: 9px; font-size: 15px;
   }
   input:focus, select:focus { outline: 2px solid var(--accent-2); }
+  .key-row { display: flex; gap: 8px; align-items: stretch; }
+  .key-row input { flex: 1 1 auto; min-width: 0; }
+  .key-toggle {
+    flex: 0 0 auto; width: 44px; background: #0d0f14; border: 1px solid var(--border);
+    color: var(--muted); border-radius: 9px; font-size: 15px; cursor: pointer; line-height: 1;
+  }
+  .key-toggle:hover { color: var(--text); border-color: var(--accent-2); }
+  .key-toggle[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+  .source-option { margin: 12px 0 0; }
+  .source-option select { background: #12151c; }
   .source { background: #0d0f14; border: 1px solid var(--border); border-radius: 11px; padding: 14px; margin-bottom: 10px; }
   .source.active { border-color: var(--accent); }
   .source-head { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
@@ -486,6 +521,18 @@ function renderConfigurePage({ baseUrl, existing }) {
     if (e.key === "Enter") { e.preventDefault(); addCustomTopic(); }
   });
 
+  // Reveal a key so it can be read back or copied when reconfiguring.
+  // The value is already in the field; this only changes how it renders.
+  Array.prototype.forEach.call(document.querySelectorAll(".key-toggle"), function (btn) {
+    btn.addEventListener("click", function () {
+      var input = btn.parentNode.querySelector(".source-key");
+      var reveal = input.type === "password";
+      input.type = reveal ? "text" : "password";
+      btn.setAttribute("aria-pressed", reveal ? "true" : "false");
+      btn.setAttribute("title", reveal ? "Hide key" : "Show key");
+    });
+  });
+
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     errorEl.style.display = "none";
@@ -498,6 +545,8 @@ function renderConfigurePage({ baseUrl, existing }) {
     });
 
     var language = document.getElementById("language").value;
+    var playbackEl = document.getElementById("youtube-playback");
+    var youtubePlayback = playbackEl ? playbackEl.value : "app";
     // Order matters: it is the order the catalogs appear in Stremio.
     var topics = TOPICS.map(function (t) {
       return t.kind === "preset" ? t.id : { q: t.query };
@@ -514,7 +563,14 @@ function renderConfigurePage({ baseUrl, existing }) {
 
     // Matches stremio-addon-sdk's own config convention exactly:
     // one path segment of encodeURIComponent(JSON.stringify(config)).
-    var configSegment = encodeURIComponent(JSON.stringify({ sources: sources, topics: topics, language: language }));
+    var configSegment = encodeURIComponent(
+      JSON.stringify({
+        sources: sources,
+        topics: topics,
+        language: language,
+        youtubePlayback: youtubePlayback
+      })
+    );
     var base = BASE_URL;
     while (base.length && base.charAt(base.length - 1) === "/") base = base.slice(0, -1);
     var httpUrl = base + "/" + configSegment + "/manifest.json";

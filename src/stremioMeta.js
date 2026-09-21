@@ -437,27 +437,35 @@ function toVideoStream(article) {
  * always offered too, as an externalUrl, so reading the full story is one
  * tap away whether or not a video exists.
  *
- * YouTube is the exception, and gets exactly one stream. `ytId` looked like
- * the right answer -- it is what the protocol documents, and it is what an
- * earlier version shipped -- but Nuvio reads only `url` and `externalUrl`
- * when resolving a stream, so a `ytId` row rendered in the list and did
- * nothing when tapped, while the `externalUrl` row bounced out to the
- * YouTube app. Neither played anything in the player. So the video is
- * served through this addon's own /yt endpoint, which hands back a real
- * MP4, and the two dead rows are gone.
+ * YouTube is the exception and gets its own pair. `ytId` looked like the
+ * right answer -- it is what the protocol documents -- but Nuvio resolves a
+ * stream through `url` and `externalUrl` only, so a `ytId` row rendered in
+ * the list and did nothing when tapped. In-app playback therefore points at
+ * this addon's own DASH manifest, which is what makes 1080p possible: the
+ * high-quality formats are adaptive, video and audio as separate files, and
+ * only a manifest can name both.
+ *
+ * Which of the two leads is the user's choice, because in-app playback
+ * leans on an undocumented YouTube API. If that breaks, flipping the setting
+ * puts the YouTube app back on the play button without waiting for a fix.
  */
-function toStreams(article, { baseUrl } = {}) {
+function toStreams(article, { baseUrl, youtubePlayback = "app" } = {}) {
   const youtubeId = article.provider === "youtube" && baseUrl ? youtubeIdOf(article) : null;
   if (youtubeId) {
-    return [
-      {
-        name: "Newsio",
-        title: `Play video (${article.sourceName})`,
-        description: `Play video (${article.sourceName})`,
-        url: `${baseUrl}/yt/${youtubeId}.mp4`,
-        behaviorHints: { videoSize: undefined, filename: `${youtubeId}.mp4` }
-      }
-    ];
+    const inApp = {
+      name: "Newsio",
+      title: `Play video in app (${article.sourceName})`,
+      description: `Play video in app (${article.sourceName})`,
+      url: `${baseUrl}/yt/${youtubeId}/manifest.mpd`,
+      behaviorHints: { filename: `${youtubeId}.mpd` }
+    };
+    const inYouTube = {
+      name: "Newsio",
+      title: `Open in YouTube app (${article.sourceName})`,
+      description: `Open in YouTube app (${article.sourceName})`,
+      externalUrl: article.link
+    };
+    return youtubePlayback === "youtube" ? [inYouTube, inApp] : [inApp, inYouTube];
   }
 
   const streams = [];

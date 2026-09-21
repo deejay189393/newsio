@@ -13,8 +13,21 @@ const MEDIA_URL = `https://rr5---sn-x.googlevideo.com/videoplayback?expire=${
   Math.floor(Date.now() / 1000) + 6 * 3600
 }&itag=18`;
 
+const FORMAT_URL = (itag) => `${MEDIA_URL}&itag=${itag}`;
+
+const adaptive = (itag, over) => ({
+  itag,
+  url: FORMAT_URL(itag),
+  initRange: { start: "0", end: "740" },
+  indexRange: { start: "741", end: "2356" },
+  contentLength: "155676321",
+  bitrate: 4334233,
+  ...over
+});
+
 const PLAYER_OK = {
   playabilityStatus: { status: "OK" },
+  videoDetails: { lengthSeconds: "212" },
   streamingData: {
     formats: [
       {
@@ -25,6 +38,16 @@ const PLAYER_OK = {
         height: 360,
         contentLength: "2048"
       }
+    ],
+    adaptiveFormats: [
+      adaptive(137, {
+        mimeType: 'video/mp4; codecs="avc1.640028"',
+        qualityLabel: "1080p",
+        width: 1920,
+        height: 1080,
+        fps: 30
+      }),
+      adaptive(140, { mimeType: 'audio/mp4; codecs="mp4a.40.2"', bitrate: 130000, audioSampleRate: "44100" })
     ]
   }
 };
@@ -181,5 +204,147 @@ describe("GET /yt/:videoId.mp4", () => {
       .get("/yt/dQw4w9WgXcQ.mp4")
       .catch(() => {});
     expect(true).toBe(true);
+  });
+});
+
+
+describe("GET /yt/:videoId/manifest.mpd", () => {
+  /** Watch page, then player API. The manifest needs no media fetch. */
+  function mockResolve() {
+    return jest
+      .spyOn(global, "fetch")
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => WATCH_HTML })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => PLAYER_OK });
+  }
+
+  test("serves a DASH manifest naming the high-quality formats", async () => {
+    mockResolve();
+    const res = await request(app).get("/yt/dQw4w9WgXcQ/manifest.mpd");
+
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("application/dash+xml");
+    expect(res.text).toContain('profiles="urn:mpeg:dash:profile:isoff-on-demand:2011"');
+    // 1080p, which the muxed 360p file could never carry.
+    expect(res.text).toContain('height="1080"');
+    expect(res.text).toContain('mediaPresentationDuration="PT212.000S"');
+  });
+
+  test("its segment URLs point back at this host, never at YouTube", async () => {
+    mockResolve();
+    const res = await request(app).get("/yt/dQw4w9WgXcQ/manifest.mpd");
+    const urls = [...res.text.matchAll(/<BaseURL>([^<]+)<\/BaseURL>/g)].map((m) => m[1]);
+    expect(urls.every((u) => u.includes("/yt/dQw4w9WgXcQ/"))).toBe(true);
+    expect(res.text).not.toContain("googlevideo");
+  });
+
+  test("a bad id is refused without contacting YouTube", async () => {
+    const spy = jest.spyOn(global, "fetch");
+    const res = await request(app).get("/yt/short/manifest.mpd");
+    expect(res.status).toBe(400);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  test("a video YouTube refuses carries its status through", async () => {
+    jest
+      .spyOn(global, "fetch")
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => WATCH_HTML })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ playabilityStatus: { status: "UNPLAYABLE", reason: "Private video" } })
+      });
+    const res = await request(app).get("/yt/dQw4w9WgXcQ/manifest.mpd");
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("GET /yt/:videoId/:itag", () => {
+  function mockFormat(media = mediaResponse()) {
+    return jest
+      .spyOn(global, "fetch")
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => WATCH_HTML })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => PLAYER_OK })
+      .mockResolvedValueOnce(media);
+  }
+
+  test("proxies one adaptive format, by the itag the manifest names", async () => {
+    const spy = mockFormat(
+      mediaResponse({ headers: { "content-type": "video/mp4", "content-length": "4" } })
+    );
+    const res = await request(app).get("/yt/dQw4w9WgXcQ/137");
+    expect(res.status).toBe(200);
+    expect(spy.mock.calls[2][0]).toBe(FORMAT_URL(137));
+  });
+
+  test("passes a Range through, which is how the player reads the index", async () => {
+    // DASH SegmentBase works entirely by ranged reads, so this is not
+    // optional: without it nothing starts at all.
+    const spy = mockFormat(
+      mediaResponse({
+        status: 206,
+        headers: { "content-type": "video/mp4", "content-range": "bytes 0-740/155676321", "content-length": "4" }
+      })
+    );
+    const res = await request(app).get("/yt/dQw4w9WgXcQ/137").set("Range", "bytes=0-740");
+    expect(spy.mock.calls[2][1].headers.Range).toBe("bytes=0-740");
+    expect(res.status).toBe(206);
+    expect(res.headers["content-range"]).toBe("bytes 0-740/155676321");
+  });
+
+  test("the audio track is reachable too", async () => {
+    const spy = mockFormat(mediaResponse({ headers: { "content-type": "audio/mp4", "content-length": "4" } }));
+    await request(app).get("/yt/dQw4w9WgXcQ/140");
+    expect(spy.mock.calls[2][0]).toBe(FORMAT_URL(140));
+  });
+
+  test("a HEAD asks upstream for headers only", async () => {
+    const spy = mockFormat(mediaResponse({ headers: { "content-length": "99" } }));
+    const res = await request(app).head("/yt/dQw4w9WgXcQ/137");
+    expect(spy.mock.calls[2][1].method).toBe("HEAD");
+    expect(res.headers["content-length"]).toBe("99");
+  });
+
+  test("an itag this video does not have is a 404", async () => {
+    jest
+      .spyOn(global, "fetch")
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => WATCH_HTML })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => PLAYER_OK });
+    const res = await request(app).get("/yt/dQw4w9WgXcQ/999");
+    expect(res.status).toBe(404);
+  });
+
+  test("a bad id is refused without contacting YouTube", async () => {
+    const spy = jest.spyOn(global, "fetch");
+    const res = await request(app).get("/yt/short/137");
+    expect(res.status).toBe(400);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  test("a resolve failure carries its status through", async () => {
+    jest.spyOn(global, "fetch").mockRejectedValueOnce(new Error("ENOTFOUND"));
+    const res = await request(app).get("/yt/dQw4w9WgXcQ/137");
+    expect(res.status).toBe(502);
+  });
+
+  test("a media fetch failure is a 502", async () => {
+    jest
+      .spyOn(global, "fetch")
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => WATCH_HTML })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => PLAYER_OK })
+      .mockRejectedValueOnce(new Error("ECONNRESET"));
+    const res = await request(app).get("/yt/dQw4w9WgXcQ/137");
+    expect(res.status).toBe(502);
+  });
+});
+
+describe("the muxed fallback", () => {
+  test("a video with no muxed format at all is a 415", async () => {
+    const noProgressive = { ...PLAYER_OK, streamingData: { ...PLAYER_OK.streamingData, formats: [] } };
+    jest
+      .spyOn(global, "fetch")
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => WATCH_HTML })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => noProgressive });
+    const res = await request(app).get("/yt/dQw4w9WgXcQ.mp4");
+    expect(res.status).toBe(415);
   });
 });

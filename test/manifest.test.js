@@ -14,8 +14,8 @@ beforeEach(() => {
 });
 
 describe("manifest basics", () => {
-  test("version is 0.8.0", () => {
-    expect(M.ADDON_VERSION).toBe("0.8.0");
+  test("version is 0.9.0", () => {
+    expect(M.ADDON_VERSION).toBe("0.9.0");
   });
 
   test("uses the short addon description", () => {
@@ -31,7 +31,7 @@ describe("manifest basics", () => {
   test("declares one id prefix per provider, so every id we mint routes to us", () => {
     const { PROVIDERS } = require("../src/providers");
     expect(M.getUnconfiguredManifest(BASE_URL).idPrefixes).toEqual(PROVIDERS.map((p) => p.idPrefix));
-    expect(M.getUnconfiguredManifest(BASE_URL).idPrefixes).toEqual(["cu_", "nd_", "yt_", "gn_"]);
+    expect(M.getUnconfiguredManifest(BASE_URL).idPrefixes).toEqual(["yt_", "cu_", "nd_", "gn_"]);
   });
 
   test("declares catalog, meta and stream resources", () => {

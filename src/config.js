@@ -21,7 +21,8 @@ function encodeConfig(config) {
       sources: normalized.sources,
       // Stored compactly: a preset is its id, a custom topic is { q }.
       topics: toStoredTopics(normalized.topics),
-      language: normalized.language
+      language: normalized.language,
+      youtubePlayback: normalized.youtubePlayback
     })
   );
 }
@@ -35,8 +36,24 @@ function normalizeConfig(config) {
   return {
     sources: normalizeSources(config && config.sources),
     topics: normalizeTopics(config && config.topics),
-    language: validLanguage(config && config.language)
+    language: validLanguage(config && config.language),
+    youtubePlayback: validYoutubePlayback(config && config.youtubePlayback)
   };
+}
+
+/**
+ * Which YouTube stream Nuvio should offer first.
+ *
+ * "app" puts in-app playback at the top, which is what almost everyone
+ * wants. The setting exists because in-app playback leans on an
+ * undocumented YouTube API: if that breaks, switching to "youtube" makes the
+ * play button hand off to the YouTube app instead, without waiting for a fix.
+ */
+const YOUTUBE_PLAYBACK_MODES = ["app", "youtube"];
+const DEFAULT_YOUTUBE_PLAYBACK = "app";
+
+function validYoutubePlayback(mode) {
+  return YOUTUBE_PLAYBACK_MODES.includes(mode) ? mode : DEFAULT_YOUTUBE_PLAYBACK;
 }
 
 /**
@@ -108,4 +125,13 @@ function unusedProviders(config) {
   return PROVIDERS.filter((p) => !used.has(p.id));
 }
 
-module.exports = { encodeConfig, decodeConfig, normalizeSources, isConfigured, unusedProviders };
+module.exports = {
+  encodeConfig,
+  decodeConfig,
+  normalizeSources,
+  isConfigured,
+  unusedProviders,
+  validYoutubePlayback,
+  YOUTUBE_PLAYBACK_MODES,
+  DEFAULT_YOUTUBE_PLAYBACK
+};
