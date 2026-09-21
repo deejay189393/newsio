@@ -28,7 +28,6 @@ const PRESET_TOPICS = [
   { id: "tourism", label: "Tourism & Travel" },
   { id: "crime", label: "Crime" },
   { id: "domestic", label: "Domestic" },
-  { id: "other", label: "Other" },
   // Not a subject but a filter: stories that carry a playable video. Only
   // newsdata.io can serve it, so the others are skipped for this catalog.
   { id: "video", label: "Video News" }

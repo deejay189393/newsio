@@ -16,9 +16,9 @@ the next, so your catalogs stay full instead of going empty.
 
 | Source | Freshness | Per request | Video | Topics covered |
 |---|---|---|---|---|
-| [Currents](https://currentsapi.services) | **minutes** | 20 (a whole page, 1 credit) | no | 16 of 17 |
+| [Currents](https://currentsapi.services) | **minutes** | 20 (a whole page, 1 credit) | no | 15 of 17 |
 | [newsdata.io](https://newsdata.io) | minutes | 10 (a page costs 2 credits) | **yes** | 17 of 17 |
-| [GNews](https://gnews.io) | **12 hours behind** on the free plan | 10 (a page costs 2 credits, spaced 1.5s apart) | no | 11 of 17 |
+| [GNews](https://gnews.io) | **12 hours behind** on the free plan | 10 (a page costs 2 credits, spaced 1.5s apart) | no | 10 of 17 |
 
 Measured, not quoted from the docs: sampled against all three at the same
 moment, the newest article Currents offered was **6 minutes old** and the
@@ -366,7 +366,7 @@ an "N on purple" where the logo should be:
 Both are rendered from the SVGs in `public/`, which are the source of truth
 and double as the inline fallback art for articles with no image of their own.
 
-Asset URLs in the manifest carry the addon version (`/logo.png?v=0.6.2`).
+Asset URLs in the manifest carry the addon version (`/logo.png?v=0.6.3`).
 Stremio clients cache addon artwork by URL, so replacing the bytes at a fixed
 path leaves the old image on screen indefinitely — which is exactly how a
 stale placeholder outlives the asset that replaced it.
@@ -404,7 +404,7 @@ npm start           # http://localhost:3000/configure
 ```
 
 ```bash
-npm test            # 709 tests
+npm test            # 713 tests
 npm run test:coverage
 ```
 
