@@ -126,8 +126,37 @@ const ACRONYMS = new Set([
   "ai", "ar", "vr", "us", "uk", "eu", "un", "uae", "gdp", "ceo", "cfo", "cto",
   "ipo", "suv", "ev", "nasa", "nfl", "nba", "mlb", "nhl", "ipl", "fifa", "uefa",
   "gps", "api", "tv", "pc", "isp", "nsfw", "pdf", "cpu", "gpu", "usb", "sms",
-  "url", "vpn", "ssd", "led", "hd", "ui", "ux", "faq", "diy"
+  "url", "vpn", "ssd", "led", "hd", "ui", "ux", "faq", "diy", "hbo", "bbc",
+  "cnn", "espn", "nato", "fbi", "cia", "nhs", "imf", "who", "un"
 ]);
+
+/**
+ * Publisher CMS fields that arrive as keywords.
+ *
+ * Seen live on a Vanity Fair story, whose tag row read "Locale: US |
+ * Sponsored: False | Issyndicated: False | Content-Type: News" -- the
+ * outlet's own internal record, not anything about the article.
+ *
+ * Matched on the key rather than the mere presence of a colon, because a
+ * colon is perfectly ordinary in a real tag ("Dune: Part Two"). A trailing
+ * boolean is caught on its own: nothing that describes a story ends in
+ * ": true" or ": false".
+ */
+const CMS_FIELD_KEYS = new Set([
+  "locale", "sponsored", "issyndicated", "syndicated", "content-type", "contenttype",
+  "type", "section", "template", "site", "env", "environment", "status", "lang",
+  "language", "region", "id", "uuid", "slug", "author", "byline", "published",
+  "updated", "source", "channel", "platform", "vertical", "brand"
+]);
+
+function isCmsField(keyword) {
+  const colon = keyword.indexOf(":");
+  if (colon === -1) return false;
+  const key = keyword.slice(0, colon).trim().toLowerCase();
+  const value = keyword.slice(colon + 1).trim().toLowerCase();
+  if (value === "true" || value === "false") return true;
+  return CMS_FIELD_KEYS.has(key);
+}
 
 // A tag, not a sentence: newsdata.io keywords occasionally run to a whole
 // clause ("sixth edition of mangaluru technovanza -2026"), which is useless
@@ -229,6 +258,7 @@ function buildGenres(article) {
       if (GENERIC_KEYWORDS.has(lower)) return false;
       if (k.includes("_")) return false; // author handles and slugs
       if (lower.includes("home page") || lower.endsWith("feed")) return false; // site navigation
+      if (isCmsField(k)) return false; // the outlet's own record, not a subject
       if (publisher.some((p) => p && (p === fold(k) || p.includes(fold(k))))) return false;
       if (lower.split("-").some((segment) => slugSegments.has(segment))) return false;
       return true;
@@ -355,6 +385,7 @@ module.exports = {
   buildDescription,
   buildFullDescription,
   buildGenres,
+  isCmsField,
   buildName,
   VIDEO_MARKER
 };

@@ -7,6 +7,7 @@ const {
   buildName,
   buildFullDescription,
   buildGenres,
+  isCmsField,
   toVideoStream,
   isPlayableVideo,
   VIDEO_MARKER
@@ -464,6 +465,61 @@ describe("buildGenres — the detail page tag row", () => {
           if (!/^[a-zA-Z]/.test(word)) return; // numbers and symbols have no case
           expect(word[0]).toBe(word[0].toUpperCase());
         });
+      });
+    });
+
+    // Seen live on a Vanity Fair story, whose whole tag row was the
+    // outlet's internal record rather than anything about the article.
+    describe("publisher CMS fields", () => {
+      test.each([
+        "locale: us",
+        "sponsored: false",
+        "issyndicated: false",
+        "content-type: news",
+        "section: culture",
+        "template: standard",
+        "status: published",
+        "lang: en"
+      ])("drops %p", (kw) => {
+        expect(isCmsField(kw)).toBe(true);
+        expect(g({ categories: [], keywords: [kw, "red carpet"] })).toEqual(["Red Carpet"]);
+      });
+
+      test("any key with a boolean value is metadata, whatever it is called", () => {
+        expect(isCmsField("paywalled: true")).toBe(true);
+        expect(isCmsField("exclusive: FALSE")).toBe(true);
+      });
+
+      test("the whole live row collapses to the real tags", () => {
+        expect(
+          g({
+            categories: ["entertainment"],
+            keywords: [
+              "locale: us",
+              "sponsored: false",
+              "issyndicated: false",
+              "content-type: news",
+              "lucas museum",
+              "red carpet"
+            ]
+          })
+        ).toEqual(["Entertainment", "Lucas Museum", "Red Carpet"]);
+      });
+
+      // A colon is ordinary in a real tag, so the key is what is matched.
+      test.each([
+        "dune: part two",
+        "star wars: andor",
+        "breaking bad: el camino",
+        "the last of us: season 2"
+      ])("keeps the real tag %p", (kw) => {
+        expect(isCmsField(kw)).toBe(false);
+        expect(g({ categories: [], keywords: [kw] })).toHaveLength(1);
+      });
+
+      test("a keyword with no colon is never treated as metadata", () => {
+        expect(isCmsField("red carpet")).toBe(false);
+        expect(isCmsField("")).toBe(false);
       });
     });
 
