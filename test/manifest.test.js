@@ -12,8 +12,8 @@ beforeEach(() => {
 });
 
 describe("manifest basics", () => {
-  test("version is 0.2.0", () => {
-    expect(M.ADDON_VERSION).toBe("0.2.0");
+  test("version is 0.2.1", () => {
+    expect(M.ADDON_VERSION).toBe("0.2.1");
   });
 
   test("uses the short addon description", () => {
@@ -167,12 +167,65 @@ describe("configured manifest", () => {
 });
 
 describe("stremio-addons.net listing credential", () => {
-  test("is omitted when no signature is configured", () => {
-    expect(M.getUnconfiguredManifest(BASE_URL).stremioAddonsConfig).toBeUndefined();
-    expect(M.getStremioAddonsConfig()).toBeUndefined();
+  // The exact token issued for https://newsio.up.railway.app/manifest.json,
+  // pinned here independently of the source so a truncated copy/paste, a
+  // stray newline from an editor, or a wrapped line in the constant fails
+  // loudly rather than silently un-verifying the addon.
+  const ISSUED_SIGNATURE =
+    "eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0." +
+    "." +
+    "Z71i61P4KsKCep97-S7_SA." +
+    "NCWCuO1Mr-1HydcNM0IAJEzFCKshMaeEPGJ0Vai4YtrqUeiuDXGajDRisu4CpDawYYPVIMJA7Ay8G-1KJijCOM0c-" +
+    "4OBAyFYinFCK_aQaBkvy49E_INGPuCHFPle8IST." +
+    "f-bNhW5MzGrVuN-65LoHsg";
+
+  test("ships by default, so the badge does not depend on an env var", () => {
+    expect(M.getStremioAddonsConfig()).toEqual({
+      issuer: "https://stremio-addons.net",
+      signature: ISSUED_SIGNATURE
+    });
   });
 
-  test("is included, with the default issuer, when a signature is set", () => {
+  test("the committed signature is exactly the one that was issued", () => {
+    expect(M.STREMIO_ADDONS_SIGNATURE).toBe(ISSUED_SIGNATURE);
+    expect(M.STREMIO_ADDONS_ISSUER).toBe("https://stremio-addons.net");
+  });
+
+  test("is on the plain unconfigured manifest -- the URL that gets claimed", () => {
+    expect(M.getUnconfiguredManifest(BASE_URL).stremioAddonsConfig).toEqual({
+      issuer: "https://stremio-addons.net",
+      signature: ISSUED_SIGNATURE
+    });
+  });
+
+  test("is on the configured manifest too", () => {
+    expect(M.buildManifest({ topics: ["top"] }, BASE_URL).stremioAddonsConfig.signature).toBe(ISSUED_SIGNATURE);
+  });
+
+  test("is a well-formed compact JWE with a dir/A128CBC-HS256 header", () => {
+    const parts = M.STREMIO_ADDONS_SIGNATURE.split(".");
+    expect(parts).toHaveLength(5);
+    expect(parts[1]).toBe(""); // alg=dir carries no encrypted key
+    expect(JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"))).toEqual({
+      alg: "dir",
+      enc: "A128CBC-HS256"
+    });
+    parts.filter(Boolean).forEach((p) => expect(p).toMatch(/^[A-Za-z0-9_-]+$/));
+  });
+
+  test("carries no whitespace that would break the token in transit", () => {
+    expect(M.STREMIO_ADDONS_SIGNATURE).not.toMatch(/\s/);
+    expect(M.STREMIO_ADDONS_SIGNATURE.trim()).toBe(M.STREMIO_ADDONS_SIGNATURE);
+  });
+
+  test("survives a JSON round trip unchanged", () => {
+    const m = JSON.parse(JSON.stringify(M.getUnconfiguredManifest(BASE_URL)));
+    expect(m.stremioAddonsConfig.signature).toBe(ISSUED_SIGNATURE);
+  });
+
+  // A fork on another host needs its own token: this one is bound to the
+  // manifest URL above and will not validate anywhere else.
+  test("an env signature overrides the committed one", () => {
     process.env.STREMIO_ADDONS_CONFIG_SIGNATURE = "sig-abc";
     jest.resetModules();
     const M2 = require("../src/manifest");
@@ -182,19 +235,19 @@ describe("stremio-addons.net listing credential", () => {
     });
   });
 
-  test("appears on the configured manifest too", () => {
-    process.env.STREMIO_ADDONS_CONFIG_SIGNATURE = "sig-xyz";
-    jest.resetModules();
-    const M2 = require("../src/manifest");
-    expect(M2.buildManifest({ topics: ["top"] }, BASE_URL).stremioAddonsConfig.signature).toBe("sig-xyz");
-  });
-
   test("honours a custom issuer override", () => {
     process.env.STREMIO_ADDONS_CONFIG_SIGNATURE = "s";
     process.env.STREMIO_ADDONS_CONFIG_ISSUER = "https://example.test";
     jest.resetModules();
     const M2 = require("../src/manifest");
     expect(M2.getStremioAddonsConfig().issuer).toBe("https://example.test");
+  });
+
+  test("an empty env signature falls back to the committed one", () => {
+    process.env.STREMIO_ADDONS_CONFIG_SIGNATURE = "";
+    jest.resetModules();
+    const M2 = require("../src/manifest");
+    expect(M2.getStremioAddonsConfig().signature).toBe(ISSUED_SIGNATURE);
   });
 });
 

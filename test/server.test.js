@@ -60,7 +60,7 @@ describe("manifest routes", () => {
     const res = await request(app).get("/manifest.json");
     expect(res.status).toBe(200);
     expect(res.body.id).toBe("org.deejay189393.newsio");
-    expect(res.body.version).toBe("0.2.0");
+    expect(res.body.version).toBe("0.2.1");
     expect(res.body.catalogs).toEqual([]);
     expect(res.body.behaviorHints.configurationRequired).toBe(true);
     expect(res.body.types).toEqual(["news"]);
@@ -72,6 +72,16 @@ describe("manifest routes", () => {
     expect(res.body.catalogs.map((c) => c.name)).toEqual(["Technology", "Finance & Business", "Newsio"]);
     expect(res.body.behaviorHints.configurationRequired).toBe(false);
     expect(res.body.behaviorHints.configurable).toBe(true);
+  });
+
+  test("the plain /manifest.json carries the stremio-addons.net credential", async () => {
+    const res = await request(app).get("/manifest.json");
+    expect(res.body.stremioAddonsConfig).toEqual({
+      issuer: "https://stremio-addons.net",
+      signature: require("../src/manifest").STREMIO_ADDONS_SIGNATURE
+    });
+    // Served verbatim over the wire, not re-encoded or truncated.
+    expect(res.text).toContain(require("../src/manifest").STREMIO_ADDONS_SIGNATURE);
   });
 
   test("the served manifest carries the new short description", async () => {
