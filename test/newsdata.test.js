@@ -4,7 +4,9 @@ const {
   getArticleById,
   normalizeArticle,
   makeArticleId,
-  PAGE_SIZE,
+  realText,
+  UPSTREAM_PAGE_SIZE,
+  CATALOG_PAGE_SIZE,
   MAX_PAGE_WALK
 } = require("../src/newsdata");
 
@@ -60,6 +62,7 @@ describe("normalizeArticle", () => {
       source_name: "Src",
       source_icon: "https://e.com/ico.png",
       category: ["technology"],
+      keywords: ["chips", "ai"],
       creator: ["Jane", "John"]
     });
     expect(n).toEqual({
@@ -73,12 +76,56 @@ describe("normalizeArticle", () => {
       sourceName: "Src",
       sourceIcon: "https://e.com/ico.png",
       category: "technology",
+      keywords: ["chips", "ai"],
       creator: "Jane, John"
     });
   });
 
+  test("keywords default to an empty list and drop non-strings", () => {
+    expect(normalizeArticle({ article_id: "x" }).keywords).toEqual([]);
+    expect(normalizeArticle({ article_id: "x", keywords: "nope" }).keywords).toEqual([]);
+    expect(normalizeArticle({ article_id: "x", keywords: ["ok", 5, null] }).keywords).toEqual(["ok"]);
+  });
+
   test("falls back to content when description is absent", () => {
     expect(normalizeArticle({ article_id: "x", content: "body text" }).description).toBe("body text");
+  });
+
+  // On the free tier newsdata.io fills content/ai_summary with an upsell
+  // string. It used to be served to users as the article description of any
+  // story whose own description was empty.
+  describe("free-tier upsell placeholders", () => {
+    test.each([
+      "ONLY AVAILABLE IN PAID PLANS",
+      "ONLY AVAILABLE IN PROFESSIONAL AND CORPORATE PLANS",
+      "ONLY AVAILABLE IN CORPORATE PLANS",
+      "only available in paid plans",
+      "  ONLY AVAILABLE IN PAID PLANS  "
+    ])("%s is treated as no text at all", (placeholder) => {
+      expect(realText(placeholder)).toBe("");
+      expect(normalizeArticle({ article_id: "x", content: placeholder }).description).toBe("");
+      expect(normalizeArticle({ article_id: "x", description: placeholder, content: "real" }).description).toBe(
+        "real"
+      );
+    });
+
+    test("a description that merely mentions a plan is kept", () => {
+      const real = "The company said only available seats in paid plans would remain.";
+      expect(realText(real)).toBe(real);
+    });
+
+    test("realText trims and rejects non-strings", () => {
+      expect(realText("  hi  ")).toBe("hi");
+      expect(realText("")).toBe("");
+      expect(realText(null)).toBe("");
+      expect(realText(42)).toBe("");
+    });
+
+    test("an empty description no longer yields placeholder text", () => {
+      const n = normalizeArticle({ article_id: "x", description: "", content: "ONLY AVAILABLE IN PAID PLANS" });
+      expect(n.description).toBe("");
+      expect(n.description).not.toMatch(/ONLY AVAILABLE/i);
+    });
   });
 
   test("falls back to source_id when source_name is absent", () => {
@@ -103,249 +150,310 @@ describe("normalizeArticle", () => {
     expect(n.category).toBeNull();
     expect(n.creator).toBeNull();
     expect(n.title).toBe("Untitled");
+    expect(n.keywords).toEqual([]);
+  });
+
+  test("descriptions are never truncated by us", () => {
+    const long = "x".repeat(1200);
+    expect(normalizeArticle({ article_id: "x", description: long }).description).toHaveLength(1200);
   });
 });
 
-describe("fetchNews", () => {
-  test("rejects with 401 when no apiKey is given", async () => {
-    await expect(fetchNews({ apiKey: "", category: "top" })).rejects.toMatchObject({ status: 401 });
+/**
+ * A page of `n` upstream articles, numbered from `start`, with an optional
+ * cursor for the page after it. Mirrors newsdata.io: at most 10 results per
+ * response, paging by an opaque `nextPage` token rather than an offset.
+ */
+const upstreamPage = (start, n = UPSTREAM_PAGE_SIZE, nextPage = null) =>
+  ok({ results: Array.from({ length: n }, (_, k) => article(`a${start + k}`)), nextPage });
+
+/** A chain of sequential upstream pages, each pointing at the next. */
+function mockChain(pageCount, perPage = UPSTREAM_PAGE_SIZE) {
+  const fn = jest.fn();
+  for (let i = 0; i < pageCount; i++) {
+    const last = i === pageCount - 1;
+    fn.mockResolvedValueOnce(upstreamPage(i * perPage, perPage, last ? null : `T${i + 1}`));
+  }
+  return (global.fetch = fn);
+}
+
+const ids = (res) => res.articles.map((a) => a.id);
+const BASE = { apiKey: "K", category: "technology", language: "en" };
+
+describe("page size", () => {
+  test("a catalog page is 20 articles, built from two upstream pages of 10", async () => {
+    const fetchMock = mockChain(2);
+    const res = await fetchNews({ ...BASE });
+    expect(res.articles).toHaveLength(CATALOG_PAGE_SIZE);
+    expect(CATALOG_PAGE_SIZE).toBe(20);
+    expect(UPSTREAM_PAGE_SIZE).toBe(10);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  test("fetches page 0 and returns normalized articles", async () => {
-    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("a1", { video_url: "https://v/1.mp4" })], nextPage: null }));
-    const res = await fetchNews({ apiKey: "k", category: "technology", language: "en", skip: 0 });
-    expect(res.articles).toHaveLength(1);
-    expect(res.articles[0].id).toBe("nd_a1");
-    expect(res.articles[0].videoUrl).toBe("https://v/1.mp4");
+  test("asks newsdata.io to collapse syndicated duplicates", async () => {
+    mockChain(2);
+    await fetchNews({ ...BASE });
+    expect(new URL(global.fetch.mock.calls[0][0]).searchParams.get("removeduplicate")).toBe("1");
+  });
+
+  test("returns fewer than a full page when upstream runs out", async () => {
+    global.fetch = jest.fn().mockResolvedValueOnce(upstreamPage(0, 7, null));
+    const res = await fetchNews({ ...BASE });
+    expect(res.articles).toHaveLength(7);
     expect(res.hasMore).toBe(false);
-    expect(res.truncated).toBe(false);
   });
 
-  test("sends apikey, language and category as query params", async () => {
-    global.fetch = jest.fn().mockResolvedValue(ok({ results: [], nextPage: null }));
-    await fetchNews({ apiKey: "KEY", category: "technology", language: "de", skip: 0 });
+  test("never repeats a story within one page", async () => {
+    // The same story served by two consecutive upstream pages (the feed
+    // shifted between calls) must not appear twice in one response.
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(ok({ results: [article("dup"), article("x1")], nextPage: "T1" }))
+      .mockResolvedValueOnce(ok({ results: [article("dup"), article("x2")], nextPage: null }));
+    const res = await fetchNews({ ...BASE });
+    expect(ids(res)).toEqual(["nd_dup", "nd_x1", "nd_x2"]);
+  });
+});
+
+describe("fetchNews — skip is an absolute item offset", () => {
+  test("skip=0 returns the first 20 stories", async () => {
+    mockChain(2);
+    expect(ids(await fetchNews({ ...BASE, skip: 0 }))).toEqual(
+      Array.from({ length: 20 }, (_, i) => `nd_a${i}`)
+    );
+  });
+
+  test("skip=20 returns the next 20, with no overlap", async () => {
+    mockChain(4);
+    const first = await fetchNews({ ...BASE, skip: 0 });
+    const second = await fetchNews({ ...BASE, skip: 20 });
+    expect(ids(second)).toEqual(Array.from({ length: 20 }, (_, i) => `nd_a${20 + i}`));
+    expect(ids(first).filter((id) => ids(second).includes(id))).toEqual([]);
+  });
+
+  test("three sequential pages yield 60 distinct stories", async () => {
+    mockChain(6);
+    const all = [];
+    for (const skip of [0, 20, 40]) all.push(...ids(await fetchNews({ ...BASE, skip })));
+    expect(all).toHaveLength(60);
+    expect(new Set(all).size).toBe(60);
+  });
+
+  test("sequential scrolling costs only two upstream calls per page", async () => {
+    const fetchMock = mockChain(6);
+    await fetchNews({ ...BASE, skip: 0 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await fetchNews({ ...BASE, skip: 20 });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    await fetchNews({ ...BASE, skip: 40 });
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  test("re-requesting a page costs nothing", async () => {
+    const fetchMock = mockChain(2);
+    const first = await fetchNews({ ...BASE, skip: 0 });
+    const again = await fetchNews({ ...BASE, skip: 0 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(ids(again)).toEqual(ids(first));
+  });
+
+  // Regression: skip used to be divided by the page size and floored, so a
+  // skip that did not land on a boundary silently re-served an earlier page.
+  test("a skip that is not a multiple of the page size is honoured exactly", async () => {
+    mockChain(4);
+    const res = await fetchNews({ ...BASE, skip: 5 });
+    expect(ids(res)).toEqual(Array.from({ length: 20 }, (_, i) => `nd_a${5 + i}`));
+  });
+
+  test("a skip mid-way through an upstream page is honoured exactly", async () => {
+    mockChain(4);
+    const res = await fetchNews({ ...BASE, skip: 13 });
+    expect(ids(res)[0]).toBe("nd_a13");
+    expect(res.articles).toHaveLength(20);
+  });
+
+  test("a cold deep skip walks the cursor chain to get there", async () => {
+    const fetchMock = mockChain(8);
+    const res = await fetchNews({ ...BASE, skip: 60 });
+    expect(ids(res)[0]).toBe("nd_a60");
+    // pages 0..7 walked; only 6 and 7 are returned
+    expect(fetchMock).toHaveBeenCalledTimes(8);
+  });
+
+  test("resumes from the furthest cached cursor instead of page 0", async () => {
+    const fetchMock = mockChain(8);
+    await fetchNews({ ...BASE, skip: 0 });   // caches pages 0,1
+    await fetchNews({ ...BASE, skip: 20 });  // caches pages 2,3
+    fetchMock.mockClear();
+    await fetchNews({ ...BASE, skip: 40 });  // should fetch only 4,5
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test.each([
+    ["a negative skip", -50],
+    ["a non-numeric skip", "abc"],
+    ["an undefined skip", undefined],
+    ["a null skip", null]
+  ])("%s is treated as the first page", async (_label, skip) => {
+    mockChain(2);
+    const res = await fetchNews({ ...BASE, skip });
+    expect(ids(res)[0]).toBe("nd_a0");
+  });
+
+  test("a fractional skip is floored", async () => {
+    mockChain(4);
+    expect(ids(await fetchNews({ ...BASE, skip: 20.9 }))[0]).toBe("nd_a20");
+  });
+});
+
+describe("fetchNews — end of feed", () => {
+  test("stops when upstream runs out mid-page", async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(upstreamPage(0, 10, "T1"))
+      .mockResolvedValueOnce(upstreamPage(10, 4, null));
+    const res = await fetchNews({ ...BASE });
+    expect(res.articles).toHaveLength(14);
+    expect(res.hasMore).toBe(false);
+  });
+
+  // Regression: a cached null cursor used to be skipped over as "not
+  // fetched yet", so paging past the end refetched page 0 and served it
+  // again -- the same headlines on every further scroll.
+  test("does not replay page 0 once a page is known to be the last", async () => {
+    global.fetch = jest.fn().mockResolvedValueOnce(upstreamPage(0, 6, null));
+    const first = await fetchNews({ ...BASE, skip: 0 });
+    expect(first.articles).toHaveLength(6);
+
+    global.fetch.mockClear();
+    const past = await fetchNews({ ...BASE, skip: 20 });
+    expect(past.articles).toEqual([]);
+    expect(past.hasMore).toBe(false);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test("every page beyond a known-last page is empty, not just the next one", async () => {
+    global.fetch = jest.fn().mockResolvedValueOnce(upstreamPage(0, 5, null));
+    await fetchNews({ ...BASE, skip: 0 });
+    global.fetch.mockClear();
+    for (const skip of [20, 40, 100]) {
+      expect((await fetchNews({ ...BASE, skip })).articles).toEqual([]);
+    }
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test("a deep, never-seen skip is capped rather than walked forever", async () => {
+    const fetchMock = jest.fn().mockResolvedValue(upstreamPage(0, 10, "T"));
+    global.fetch = fetchMock;
+    const res = await fetchNews({ ...BASE, skip: MAX_PAGE_WALK * UPSTREAM_PAGE_SIZE + 500 });
+    expect(res.articles).toEqual([]);
+    expect(res.truncated).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("the cap allows the pages the manifest actually advertises", async () => {
+    // Worst case a client can reach by stepping through the declared skip
+    // options with a cold cache one step at a time.
+    expect(MAX_PAGE_WALK).toBeGreaterThanOrEqual(CATALOG_PAGE_SIZE / UPSTREAM_PAGE_SIZE);
+  });
+});
+
+describe("fetchNews — query shape", () => {
+  test("sends the category for a topic browse", async () => {
+    mockChain(2);
+    await fetchNews({ ...BASE });
     const url = new URL(global.fetch.mock.calls[0][0]);
-    expect(url.origin + url.pathname).toBe("https://newsdata.io/api/1/latest");
-    expect(url.searchParams.get("apikey")).toBe("KEY");
-    expect(url.searchParams.get("language")).toBe("de");
     expect(url.searchParams.get("category")).toBe("technology");
+    expect(url.searchParams.has("q")).toBe(false);
   });
 
-  test("defaults to English when no language is supplied", async () => {
-    global.fetch = jest.fn().mockResolvedValue(ok({ results: [], nextPage: null }));
-    await fetchNews({ apiKey: "k", category: "top" });
-    expect(new URL(global.fetch.mock.calls[0][0]).searchParams.get("language")).toBe("en");
-  });
-
-  test("uses q instead of category for a search query", async () => {
-    global.fetch = jest.fn().mockResolvedValue(ok({ results: [], nextPage: null }));
-    await fetchNews({ apiKey: "k", query: "ai chips", language: "en", skip: 0 });
+  test("sends q and no category for a search", async () => {
+    mockChain(2);
+    await fetchNews({ apiKey: "K", query: "ai chips", language: "en" });
     const url = new URL(global.fetch.mock.calls[0][0]);
     expect(url.searchParams.get("q")).toBe("ai chips");
     expect(url.searchParams.has("category")).toBe(false);
   });
 
-  test("reports hasMore when upstream has a next page", async () => {
-    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("a1")], nextPage: "TOK" }));
-    expect((await fetchNews({ apiKey: "k", category: "top" })).hasMore).toBe(true);
+  test("defaults the language to English", async () => {
+    mockChain(2);
+    await fetchNews({ apiKey: "K", category: "top" });
+    expect(new URL(global.fetch.mock.calls[0][0]).searchParams.get("language")).toBe("en");
   });
 
-  test("tolerates a malformed results payload", async () => {
-    global.fetch = jest.fn().mockResolvedValue(ok({ results: "not-an-array", nextPage: null }));
-    expect((await fetchNews({ apiKey: "k", category: "top" })).articles).toEqual([]);
+  test("searches and topics cache separately", async () => {
+    const fetchMock = mockChain(4);
+    await fetchNews({ ...BASE });
+    await fetchNews({ apiKey: "K", query: "ai", language: "en" });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
-  test("caches a page so a repeat request makes no second network call", async () => {
-    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("a1")], nextPage: null }));
-    await fetchNews({ apiKey: "k", category: "top", language: "en", skip: 0 });
-    await fetchNews({ apiKey: "k", category: "top", language: "en", skip: 0 });
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-  });
-
-  test("caches per query: a different topic is fetched separately", async () => {
-    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("a1")], nextPage: null }));
-    await fetchNews({ apiKey: "k", category: "top", language: "en" });
-    await fetchNews({ apiKey: "k", category: "technology", language: "en" });
-    expect(global.fetch).toHaveBeenCalledTimes(2);
-  });
-
-  test("caches per language: the same topic in another language is fetched separately", async () => {
-    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("a1")], nextPage: null }));
-    await fetchNews({ apiKey: "k", category: "top", language: "en" });
-    await fetchNews({ apiKey: "k", category: "top", language: "fr" });
-    expect(global.fetch).toHaveBeenCalledTimes(2);
-  });
-
-  test("walks the cursor chain to reach a later page via skip", async () => {
-    const page0 = { results: [article("a1"), article("a2")], nextPage: "TOKEN_1" };
-    const page1 = { results: [article("a3")], nextPage: null };
-    global.fetch = jest.fn((u) =>
-      Promise.resolve(ok(new URL(u).searchParams.get("page") === "TOKEN_1" ? page1 : page0))
-    );
-
-    const first = await fetchNews({ apiKey: "k", category: "top", skip: 0 });
-    expect(first.articles.map((a) => a.id)).toEqual(["nd_a1", "nd_a2"]);
-
-    const second = await fetchNews({ apiKey: "k", category: "top", skip: PAGE_SIZE });
-    expect(second.articles.map((a) => a.id)).toEqual(["nd_a3"]);
-    expect(global.fetch).toHaveBeenCalledTimes(2);
-  });
-
-  test("passes the opaque cursor token upstream as the page param", async () => {
-    const page0 = { results: [article("a1")], nextPage: "TOKEN_1" };
-    const page1 = { results: [article("a2")], nextPage: null };
-    global.fetch = jest.fn((u) =>
-      Promise.resolve(ok(new URL(u).searchParams.get("page") === "TOKEN_1" ? page1 : page0))
-    );
-    await fetchNews({ apiKey: "k", category: "top", skip: 0 });
-    await fetchNews({ apiKey: "k", category: "top", skip: PAGE_SIZE });
+  test("the cursor sent for page 2 is the token page 1 returned", async () => {
+    mockChain(4);
+    await fetchNews({ ...BASE, skip: 0 });
     expect(new URL(global.fetch.mock.calls[0][0]).searchParams.has("page")).toBe(false);
-    expect(new URL(global.fetch.mock.calls[1][0]).searchParams.get("page")).toBe("TOKEN_1");
+    expect(new URL(global.fetch.mock.calls[1][0]).searchParams.get("page")).toBe("T1");
   });
 
-  test("reuses cached intermediate cursors instead of re-walking from page 0", async () => {
-    const pages = {
-      none: { results: [article("a1")], nextPage: "T1" },
-      T1: { results: [article("a2")], nextPage: "T2" },
-      T2: { results: [article("a3")], nextPage: null }
-    };
-    global.fetch = jest.fn((u) => Promise.resolve(ok(pages[new URL(u).searchParams.get("page") || "none"])));
+  test("requires an API key", async () => {
+    await expect(fetchNews({ category: "top" })).rejects.toMatchObject({ status: 401 });
+  });
+});
 
-    await fetchNews({ apiKey: "k", category: "top", skip: 0 });
-    await fetchNews({ apiKey: "k", category: "top", skip: PAGE_SIZE });
-    expect(global.fetch).toHaveBeenCalledTimes(2);
+describe("upstream failures", () => {
+  const BASE2 = { apiKey: "K", category: "top" };
 
-    const third = await fetchNews({ apiKey: "k", category: "top", skip: PAGE_SIZE * 2 });
-    expect(third.articles.map((a) => a.id)).toEqual(["nd_a3"]);
-    expect(global.fetch).toHaveBeenCalledTimes(3); // only the one new page
+  test("a network failure becomes a 502", async () => {
+    global.fetch = jest.fn().mockRejectedValue(new Error("ECONNRESET"));
+    await expect(fetchNews(BASE2)).rejects.toMatchObject({ status: 502 });
+    await expect(fetchNews(BASE2)).rejects.toThrow(/Could not reach newsdata.io/);
   });
 
-  test("a mid-scroll skip lands on the right page without refetching earlier ones", async () => {
-    const pages = {
-      none: { results: [article("a1")], nextPage: "T1" },
-      T1: { results: [article("a2")], nextPage: "T2" },
-      T2: { results: [article("a3")], nextPage: null }
-    };
-    global.fetch = jest.fn((u) => Promise.resolve(ok(pages[new URL(u).searchParams.get("page") || "none"])));
-    await fetchNews({ apiKey: "k", category: "top", skip: 0 });
-    global.fetch.mockClear();
-    const res = await fetchNews({ apiKey: "k", category: "top", skip: PAGE_SIZE * 2 });
-    expect(res.articles.map((a) => a.id)).toEqual(["nd_a3"]);
-    expect(global.fetch).toHaveBeenCalledTimes(2); // pages 1 and 2 only
-  });
-
-  test("a non-multiple skip resolves to the containing page", async () => {
-    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("a1")], nextPage: null }));
-    const res = await fetchNews({ apiKey: "k", category: "top", skip: 3 }); // still page 0
-    expect(res.articles.map((a) => a.id)).toEqual(["nd_a1"]);
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-  });
-
-  test("a negative skip is clamped to page 0", async () => {
-    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("a1")], nextPage: null }));
-    expect((await fetchNews({ apiKey: "k", category: "top", skip: -50 })).articles).toHaveLength(1);
-  });
-
-  test("returns an empty truncated page when skip is deeper than MAX_PAGE_WALK allows", async () => {
-    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("a1")], nextPage: "MORE" }));
-    const res = await fetchNews({ apiKey: "k", category: "top", skip: PAGE_SIZE * (MAX_PAGE_WALK + 5) });
-    expect(res.articles).toEqual([]);
-    expect(res.truncated).toBe(true);
-    expect(global.fetch).not.toHaveBeenCalled(); // refuses to burn the rate limit
-  });
-
-  test("does not replay page 0 when paging past a page already known to be the last", async () => {
-    // Regression: a cached cursor of null means "no page after this one".
-    // It must end pagination, not be carried forward as "no cursor" -- which
-    // would refetch page 0 and serve it as page 1 (duplicate headlines the
-    // moment a user scrolls past the end of a single-page topic).
-    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("a1")], nextPage: null }));
-    const p0 = await fetchNews({ apiKey: "k", category: "top", skip: 0 });
-    expect(p0.articles.map((a) => a.id)).toEqual(["nd_a1"]);
-    global.fetch.mockClear();
-
-    const p1 = await fetchNews({ apiKey: "k", category: "top", skip: PAGE_SIZE });
-    expect(p1.articles).toEqual([]);
-    expect(p1.hasMore).toBe(false);
-    expect(global.fetch).not.toHaveBeenCalled(); // and it costs no upstream call
-  });
-
-  test("ends pagination for any page beyond a known-last page, not just the next one", async () => {
-    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("a1")], nextPage: null }));
-    await fetchNews({ apiKey: "k", category: "top", skip: 0 });
-    const far = await fetchNews({ apiKey: "k", category: "top", skip: PAGE_SIZE * 3 });
-    expect(far.articles).toEqual([]);
-  });
-
-  test("stops gracefully when upstream runs out of pages mid-walk", async () => {
-    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("a1")], nextPage: null }));
-    const res = await fetchNews({ apiKey: "k", category: "top", skip: PAGE_SIZE });
-    expect(res.articles).toEqual([]);
-    expect(res.truncated).toBe(false);
-  });
-
-  test("wraps a network failure as a 502", async () => {
-    global.fetch = jest.fn().mockRejectedValue(new Error("boom"));
-    await expect(fetchNews({ apiKey: "k", category: "top" })).rejects.toMatchObject({
-      status: 502,
-      message: expect.stringContaining("boom")
-    });
-  });
-
-  test("propagates an upstream HTTP error with its status and message", async () => {
+  test("surfaces newsdata.io's own message from results.message", async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: false,
       status: 429,
-      json: async () => ({ results: { message: "rate limit exceeded" } })
+      json: async () => ({ results: { message: "Rate limit exceeded" } })
     });
-    await expect(fetchNews({ apiKey: "k", category: "top" })).rejects.toMatchObject({
-      status: 429,
-      message: "rate limit exceeded"
-    });
+    await expect(fetchNews(BASE2)).rejects.toThrow("Rate limit exceeded");
   });
 
-  test("reads a top-level error message when there is no results.message", async () => {
+  test("surfaces a top-level message when there is no results envelope", async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: false,
       status: 401,
-      json: async () => ({ message: "invalid api key" })
+      json: async () => ({ message: "Invalid API key" })
     });
-    await expect(fetchNews({ apiKey: "bad", category: "top" })).rejects.toMatchObject({ message: "invalid api key" });
+    await expect(fetchNews(BASE2)).rejects.toMatchObject({ status: 401 });
+    await expect(fetchNews(BASE2)).rejects.toThrow("Invalid API key");
   });
 
   test("falls back to a generic message when the error body is not JSON", async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: false,
       status: 500,
-      json: async () => { throw new Error("not json"); }
+      json: async () => {
+        throw new Error("not json");
+      }
     });
-    await expect(fetchNews({ apiKey: "k", category: "top" })).rejects.toMatchObject({
-      status: 500,
-      message: expect.stringContaining("500")
-    });
+    await expect(fetchNews(BASE2)).rejects.toThrow("newsdata.io returned HTTP 500");
   });
 
-test("falls back to a generic message when the error body is null", async () => {
-    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 503, json: async () => null });
-    await expect(fetchNews({ apiKey: "k", category: "top" })).rejects.toMatchObject({
-      status: 503,
-      message: expect.stringContaining("503")
-    });
+  test("falls back to a generic message when the body is JSON but empty", async () => {
+    global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({}) });
+    await expect(fetchNews(BASE2)).rejects.toThrow("newsdata.io returned HTTP 503");
   });
 
-  test("falls back safely if the freshly-cached page cannot be read back", async () => {
-    // Defensive path: guards against the page being evicted between write and read.
-    const cache = require("../src/cache");
-    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("a1")], nextPage: null }));
-    jest.spyOn(cache.catalogCache, "get").mockReturnValue(undefined);
-    const res = await fetchNews({ apiKey: "k", category: "top" });
-    expect(res).toEqual({ articles: [], hasMore: false, truncated: false });
+  test("a malformed results field yields an empty page rather than throwing", async () => {
+    global.fetch = jest.fn().mockResolvedValue(ok({ results: "nonsense", nextPage: null }));
+    const res = await fetchNews(BASE2);
+    expect(res.articles).toEqual([]);
+    expect(res.hasMore).toBe(false);
   });
 
-  test("populates the article cache as a side effect of a catalog fetch", async () => {
-    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("a1")], nextPage: null }));
-    await fetchNews({ apiKey: "k", category: "top" });
-    expect(articleCache.get("nd_a1")).toMatchObject({ id: "nd_a1" });
+  test("a missing results field yields an empty page", async () => {
+    global.fetch = jest.fn().mockResolvedValue(ok({ nextPage: null }));
+    expect((await fetchNews(BASE2)).articles).toEqual([]);
   });
 });
 

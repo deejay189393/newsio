@@ -1,6 +1,6 @@
 const { clearAllCaches } = require("../src/cache");
 const { createAddonInterface } = require("../src/addonInterface");
-const { PAGE_SIZE } = require("../src/newsdata");
+const { CATALOG_PAGE_SIZE, UPSTREAM_PAGE_SIZE } = require("../src/newsdata");
 const { SEARCH_CATALOG_ID } = require("../src/manifest");
 
 let iface;
@@ -81,14 +81,26 @@ describe("catalog handler", () => {
     expect(res.metas[0].id).toBe("nd_s1");
   });
 
-  test("skip advances to the next page of results", async () => {
+  test("skip advances to the next catalog page of results", async () => {
+    // One catalog page spans two upstream pages of 10.
+    const page = (start, next) =>
+      ok({ results: Array.from({ length: 10 }, (_, k) => article(`a${start + k}`)), nextPage: next });
     global.fetch = jest
       .fn()
-      .mockResolvedValueOnce(ok({ results: [article("a1")], nextPage: "T1" }))
-      .mockResolvedValueOnce(ok({ results: [article("a2")], nextPage: null }));
-    await iface.get("catalog", "news", "technology", {}, CONFIG);
-    const page2 = await iface.get("catalog", "news", "technology", { skip: String(PAGE_SIZE) }, CONFIG);
-    expect(page2.metas[0].id).toBe("nd_a2");
+      .mockResolvedValueOnce(page(0, "T1"))
+      .mockResolvedValueOnce(page(10, "T2"))
+      .mockResolvedValueOnce(page(20, "T3"))
+      .mockResolvedValueOnce(page(30, null));
+
+    const page1 = await iface.get("catalog", "news", "technology", {}, CONFIG);
+    const page2 = await iface.get("catalog", "news", "technology", { skip: String(CATALOG_PAGE_SIZE) }, CONFIG);
+
+    expect(page1.metas).toHaveLength(CATALOG_PAGE_SIZE);
+    expect(page2.metas).toHaveLength(CATALOG_PAGE_SIZE);
+    expect(page1.metas[0].id).toBe("nd_a0");
+    expect(page2.metas[0].id).toBe("nd_a20");
+    const overlap = page2.metas.filter((m) => page1.metas.some((p) => p.id === m.id));
+    expect(overlap).toEqual([]);
   });
 
   test("a non-numeric skip is treated as the first page", async () => {
@@ -112,10 +124,10 @@ describe("catalog handler", () => {
       "catalog",
       "news",
       SEARCH_CATALOG_ID,
-      { search: "chips", skip: String(PAGE_SIZE) },
+      { search: "chips", skip: String(CATALOG_PAGE_SIZE) },
       CONFIG
     );
-    expect(p2.metas[0].id).toBe("nd_s2");
+    expect(p2.metas).toEqual([]);
     expect(new URL(global.fetch.mock.calls[1][0]).searchParams.get("q")).toBe("chips");
   });
 });
@@ -199,7 +211,9 @@ describe("stream handler", () => {
       ok({ results: [article("a1", { video_url: "https://e.com/a1.mp4" })] })
     );
     const res = await iface.get("stream", "news", "nd_a1", {}, CONFIG);
-    expect(res.streams[0].externalUrl).toBe("https://e.com/a1.mp4");
+    // `url`, not `externalUrl`: the player opens this, a browser does not.
+    expect(res.streams[0].url).toBe("https://e.com/a1.mp4");
+    expect(res.streams[0].externalUrl).toBeUndefined();
     expect(res.streams).toHaveLength(2);
     expect(res.cacheMaxAge).toBe(3600);
   });

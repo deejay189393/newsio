@@ -5,6 +5,10 @@ const {
   formatReleaseInfo,
   buildDescription,
   buildName,
+  buildFullDescription,
+  buildGenres,
+  toVideoStream,
+  isPlayableVideo,
   VIDEO_MARKER
 } = require("../src/stremioMeta");
 const { FALLBACK_POSTER, FALLBACK_BACKGROUND } = require("../src/fallbackImages");
@@ -92,6 +96,35 @@ describe("buildName — telling video stories from text stories", () => {
     expect(toMetaPreview(textArticle).name).toBe(toFullMeta(textArticle).name);
   });
 
+  // newsdata.io also returns embed pages as video_url. Marking one with a
+  // play glyph promises a player that never opens -- the very complaint the
+  // marker exists to answer -- so the marker tracks real playability.
+  test("an embed page is not marked as playable", () => {
+    const embed = { id: "nd_e", title: "Clip", videoUrl: "https://tv.naver.com/embed/105719084", link: "https://l", sourceName: "S" };
+    expect(isPlayableVideo(embed)).toBe(false);
+    expect(buildName(embed)).toBe("Clip");
+    expect(toMetaPreview(embed).name).toBe("Clip");
+  });
+
+  test("an embed page still offers a way to reach the video", () => {
+    const embed = { id: "nd_e", title: "Clip", videoUrl: "https://tv.naver.com/embed/1", link: "https://l", sourceName: "S" };
+    const streams = toStreams(embed);
+    expect(streams).toHaveLength(2);
+    expect(streams[0].externalUrl).toBe("https://tv.naver.com/embed/1");
+  });
+
+  test.each([
+    ["a direct mp4", "https://cdn.example.com/a.mp4", true],
+    ["a YouTube link", "https://youtu.be/dQw4w9WgXcQ", true],
+    ["an HLS playlist", "https://example.com/s.m3u8", true],
+    ["an embed page", "https://tv.naver.com/embed/1", false],
+    ["no video at all", null, false]
+  ])("the marker on %s matches whether it plays", (_label, videoUrl, expected) => {
+    const a = { title: "S", videoUrl, link: "https://l", sourceName: "S" };
+    expect(isPlayableVideo(a)).toBe(expected);
+    expect(buildName(a).startsWith(VIDEO_MARKER)).toBe(expected);
+  });
+
   test("a video story with no description is still marked", () => {
     const bare = { id: "nd_3", title: "Clip", description: "", videoUrl: "https://v/x.mp4", link: "https://l" };
     expect(toMetaPreview(bare).name).toBe("\u25b6 Clip");
@@ -147,8 +180,15 @@ describe("toFullMeta", () => {
     expect(toFullMeta({ ...textArticle, category: null }).genres).toBeUndefined();
   });
 
-  test("carries the same [VIDEO] tag as the preview, so the detail page agrees with the grid", () => {
-    expect(toFullMeta(videoArticle).description).toBe(toMetaPreview(videoArticle).description);
+  test("the detail page leads with the same summary the grid shows", () => {
+    expect(toFullMeta(videoArticle).description.startsWith(toMetaPreview(videoArticle).description)).toBe(true);
+  });
+
+  test("the detail page adds a provenance line the grid has no room for", () => {
+    const full = toFullMeta(videoArticle).description;
+    expect(full).toContain("Example News");
+    expect(full).toContain("Jane Doe");
+    expect(full).toContain("2026-09-18");
   });
 
   test("keeps the id stable between preview and full meta", () => {
@@ -156,11 +196,68 @@ describe("toFullMeta", () => {
   });
 });
 
+describe("toVideoStream — what actually plays", () => {
+  // The protocol distinction that matters: `url` and `ytId` are played by
+  // Stremio, `externalUrl` is "an external URL to the video, which should be
+  // opened in a browser". A real media file put in externalUrl never reaches
+  // the player at all -- which is what this addon used to do for every video.
+  const v = (videoUrl) => toVideoStream({ videoUrl });
+
+  test("a direct https mp4 becomes a playable url stream", () => {
+    const s = v("https://cdn.jwplayer.com/videos/abc.mp4");
+    expect(s.url).toBe("https://cdn.jwplayer.com/videos/abc.mp4");
+    expect(s.externalUrl).toBeUndefined();
+    expect(s.behaviorHints).toBeUndefined();
+  });
+
+  test.each([
+    ["an HLS playlist", "https://example.com/live/stream.m3u8"],
+    ["a webm file", "https://example.com/clip.webm"],
+    ["a plain-http mp4", "http://example.com/clip.mp4"],
+    ["an mkv file", "https://example.com/clip.mkv"],
+    ["a mov file", "https://example.com/clip.mov"]
+  ])("%s plays as a url, flagged notWebReady", (_label, url) => {
+    const s = v(url);
+    expect(s.url).toBe(url);
+    expect(s.behaviorHints).toEqual({ notWebReady: true });
+  });
+
+  test("a media url with a query string is still recognised", () => {
+    expect(v("https://cdn.example.com/a.mp4?token=xyz").url).toBe("https://cdn.example.com/a.mp4?token=xyz");
+    expect(v("https://cdn.example.com/a.mp4?token=xyz").behaviorHints).toBeUndefined();
+  });
+
+  test.each([
+    ["https://www.youtube.com/watch?v=dQw4w9WgXcQ", "dQw4w9WgXcQ"],
+    ["https://youtu.be/dQw4w9WgXcQ", "dQw4w9WgXcQ"],
+    ["https://www.youtube.com/embed/dQw4w9WgXcQ", "dQw4w9WgXcQ"],
+    ["https://www.youtube.com/shorts/dQw4w9WgXcQ", "dQw4w9WgXcQ"],
+    ["https://www.youtube.com/watch?list=PL1&v=dQw4w9WgXcQ", "dQw4w9WgXcQ"]
+  ])("%s plays through the built-in YouTube player", (url, id) => {
+    const s = v(url);
+    expect(s.ytId).toBe(id);
+    expect(s.url).toBeUndefined();
+    expect(s.externalUrl).toBeUndefined();
+  });
+
+  test("a page that merely hosts a video falls back to opening a browser", () => {
+    const s = v("https://example.com/news/story-with-video");
+    expect(s.externalUrl).toBe("https://example.com/news/story-with-video");
+    expect(s.url).toBeUndefined();
+    expect(s.ytId).toBeUndefined();
+  });
+
+  test.each([[null], [undefined], [""], [42]])("%p yields no video stream", (videoUrl) => {
+    expect(toVideoStream({ videoUrl })).toBeNull();
+  });
+});
+
 describe("toStreams", () => {
-  test("a video story offers the video first, then the article", () => {
+  test("a video story offers the playable video first, then the article", () => {
     const s = toStreams(videoArticle);
     expect(s).toHaveLength(2);
-    expect(s[0].externalUrl).toBe("https://example.com/a1.mp4");
+    expect(s[0].url).toBe("https://example.com/a1.mp4");
+    expect(s[0].externalUrl).toBeUndefined();
     expect(s[0].title).toContain("Play video");
     expect(s[1].externalUrl).toBe("https://example.com/a1");
     expect(s[1].title).toBe("Read full story on Example News");
@@ -173,15 +270,78 @@ describe("toStreams", () => {
     expect(s[0].title).toBe("Read on Business Wire");
   });
 
-  test("every stream is branded Newsio and carries a URL", () => {
+  test("every stream is branded Newsio and points somewhere", () => {
     [...toStreams(videoArticle), ...toStreams(textArticle)].forEach((s) => {
       expect(s.name).toBe("Newsio");
-      expect(typeof s.externalUrl).toBe("string");
+      expect(Boolean(s.url || s.ytId || s.externalUrl)).toBe(true);
     });
+  });
+
+  test("streams carry both title and description, for old and new clients", () => {
+    toStreams(videoArticle).forEach((s) => {
+      expect(typeof s.title).toBe("string");
+      expect(s.description).toBe(s.title);
+    });
+  });
+
+  test("the article link is always an externalUrl -- it is a webpage", () => {
+    expect(toStreams(videoArticle)[1].externalUrl).toBe(videoArticle.link);
+    expect(toStreams(videoArticle)[1].url).toBeUndefined();
   });
 
   test("the stream list reflects exactly whether a video URL exists for that id", () => {
     expect(toStreams({ ...textArticle, videoUrl: "https://v/x.mp4" })).toHaveLength(2);
     expect(toStreams({ ...videoArticle, videoUrl: null })).toHaveLength(1);
+  });
+});
+
+describe("buildGenres", () => {
+  test("leads with the category, then the story's own keywords", () => {
+    expect(buildGenres({ category: "technology", keywords: ["chips", "ai"] })).toEqual([
+      "technology",
+      "chips",
+      "ai"
+    ]);
+  });
+
+  test("de-duplicates and caps the tag row", () => {
+    expect(buildGenres({ category: "tech", keywords: ["tech", "tech"] })).toEqual(["tech"]);
+    expect(buildGenres({ category: "a", keywords: ["b", "c", "d", "e", "f", "g", "h"] })).toHaveLength(6);
+  });
+
+  test("drops blanks and non-strings", () => {
+    expect(buildGenres({ category: null, keywords: ["  ", 5, "ok"] })).toEqual(["ok"]);
+  });
+
+  test("is undefined when a story has no tags at all", () => {
+    expect(buildGenres({ category: null, keywords: [] })).toBeUndefined();
+    expect(buildGenres({})).toBeUndefined();
+  });
+});
+
+describe("buildFullDescription", () => {
+  test("is the summary plus a source / byline / date line", () => {
+    expect(buildFullDescription(videoArticle)).toBe(
+      "Speedups incoming.\n\nExample News · Jane Doe · 2026-09-18"
+    );
+  });
+
+  test("omits the byline when the story has no author", () => {
+    expect(buildFullDescription(textArticle)).toBe("Stocks jumped.\n\nBusiness Wire · 2026-09-19");
+  });
+
+  test("still gives a provenance line when there is no summary", () => {
+    expect(buildFullDescription({ description: "", sourceName: "Src", pubDate: "2026-09-18 10:00:00" })).toBe(
+      "Src · 2026-09-18"
+    );
+  });
+
+  test("is undefined when there is nothing at all to say", () => {
+    expect(buildFullDescription({})).toBeUndefined();
+  });
+
+  test("does not truncate a long summary", () => {
+    const long = "y".repeat(900);
+    expect(buildFullDescription({ description: long })).toBe(long);
   });
 });
