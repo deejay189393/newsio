@@ -4,6 +4,7 @@ const express = require("express");
 const { decodeConfig } = require("./src/config");
 const { withBaseUrl } = require("./src/requestContext");
 const { resolveVideo, buildDashManifest, ANDROID_CLIENT, VIDEO_ID_RE } = require("./src/youtubeStream");
+const { recordSuccess, recordFailure } = require("./src/youtubeHealth");
 const { buildManifest, getUnconfiguredManifest } = require("./src/manifest");
 const { renderConfigurePage } = require("./src/configurePage");
 const { createResourceRouter } = require("./src/addonInterface");
@@ -48,6 +49,9 @@ app.use(express.static(path.join(__dirname, "public")));
  *   /yt/<id>.mp4           the muxed 360p file, for a player without DASH
  */
 function resolveFailed(res, videoId, err) {
+  // Remembered so the stream list can lead with the YouTube app while
+  // playback is down, rather than offering a button that fails.
+  recordFailure(err);
   console.error(`[yt] ${videoId}: ${err.message}`);
   const status = err.status >= 400 && err.status < 600 ? err.status : 502;
   return res.status(status).json({ error: err.message });
@@ -92,6 +96,7 @@ async function playManifest(req, res) {
   let video;
   try {
     video = await resolveVideo(videoId);
+    recordSuccess();
   } catch (err) {
     return resolveFailed(res, videoId, err);
   }
@@ -116,6 +121,7 @@ async function playFormat(req, res) {
   let video;
   try {
     video = await resolveVideo(videoId);
+    recordSuccess();
   } catch (err) {
     return resolveFailed(res, videoId, err);
   }
@@ -133,6 +139,7 @@ async function playProgressive(req, res) {
   let video;
   try {
     video = await resolveVideo(videoId);
+    recordSuccess();
   } catch (err) {
     return resolveFailed(res, videoId, err);
   }

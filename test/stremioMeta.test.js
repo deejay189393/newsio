@@ -747,3 +747,51 @@ describe("a YouTube story offers both ways to watch it", () => {
     expect(toFullMeta({ ...ytArticle, duration: null }).runtime).toBeUndefined();
   });
 });
+
+describe("when YouTube is refusing to serve this server", () => {
+  const ytArticle = {
+    id: "yt_dQw4w9WgXcQ",
+    title: "Reuters headlines",
+    link: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    sourceName: "Reuters",
+    keywords: [],
+    categories: [],
+    provider: "youtube"
+  };
+  const streams = (over) =>
+    toStreams(ytArticle, { baseUrl: "https://newsio.up.railway.app", ...over });
+
+  test("the working option leads, so the first thing selected actually plays", () => {
+    const s = streams({ youtubeHealthy: false });
+    expect(s[0].externalUrl).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+    expect(s[1].url).toContain("/manifest.mpd");
+  });
+
+  test("the demoted option says why rather than just failing when picked", () => {
+    const s = streams({ youtubeHealthy: false });
+    expect(s[1].title).toContain("unavailable right now");
+    expect(s[1].description).toContain("refusing to serve this server");
+  });
+
+  test("it is still offered, because the block lifts on its own", () => {
+    expect(streams({ youtubeHealthy: false })).toHaveLength(2);
+  });
+
+  test("a healthy server is unaffected", () => {
+    const s = streams({ youtubeHealthy: true });
+    expect(s[0].url).toContain("/manifest.mpd");
+    expect(s[0].title).not.toContain("unavailable");
+  });
+
+  test("health is assumed good when nothing says otherwise", () => {
+    expect(streams({})[0].url).toContain("/manifest.mpd");
+  });
+
+  test("someone who already chose the YouTube app sees no change", () => {
+    const a = streams({ youtubePlayback: "youtube", youtubeHealthy: true });
+    const b = streams({ youtubePlayback: "youtube", youtubeHealthy: false });
+    expect(a[0].externalUrl).toBeTruthy();
+    expect(b[0].externalUrl).toBeTruthy();
+  });
+});

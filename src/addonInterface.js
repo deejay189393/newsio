@@ -6,6 +6,7 @@ const { fetchCatalogPage, getArticle } = require("./sources");
 const { normalizeSources } = require("./config");
 const { toMetaPreview, toFullMeta, toStreams } = require("./stremioMeta");
 const { currentBaseUrl } = require("./requestContext");
+const { isPlaybackHealthy } = require("./youtubeHealth");
 
 /**
  * Wires the catalog/meta/stream logic into the official stremio-addon-sdk
@@ -87,7 +88,8 @@ function createAddonInterface() {
     return {
       streams: toStreams(article, {
         baseUrl: currentBaseUrl(),
-        youtubePlayback: config && config.youtubePlayback
+        youtubePlayback: config && config.youtubePlayback,
+        youtubeHealthy: isPlaybackHealthy()
       }),
       cacheMaxAge: 3600
     };
