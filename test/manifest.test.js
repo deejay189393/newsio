@@ -14,8 +14,8 @@ beforeEach(() => {
 });
 
 describe("manifest basics", () => {
-  test("version is 0.6.0", () => {
-    expect(M.ADDON_VERSION).toBe("0.6.0");
+  test("version is 0.6.1", () => {
+    expect(M.ADDON_VERSION).toBe("0.6.1");
   });
 
   test("uses the short addon description", () => {
@@ -44,12 +44,14 @@ describe("manifest basics", () => {
     expect(m.name).toBe("Newsio");
     expect(m.description.length).toBeGreaterThan(20);
     expect(m.contactEmail).toMatch(/@/);
-    expect(m.logo).toBe(`${BASE_URL}/logo.png`);
-    expect(m.background).toBe(`${BASE_URL}/background.png`);
+    expect(m.logo).toBe(`${BASE_URL}/logo.png?v=${M.ADDON_VERSION}`);
+    expect(m.background).toBe(`${BASE_URL}/background.png?v=${M.ADDON_VERSION}`);
   });
 
   test("asset URLs follow the host it is served from", () => {
-    expect(M.getUnconfiguredManifest("https://other.example").logo).toBe("https://other.example/logo.png");
+    expect(M.getUnconfiguredManifest("https://other.example").logo).toBe(
+      `https://other.example/logo.png?v=${M.ADDON_VERSION}`
+    );
   });
 
   test("stays within the 8KB addonCollection limit", () => {

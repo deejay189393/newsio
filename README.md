@@ -352,6 +352,25 @@ newsdata.io also offers `prioritydomain=top`, which cuts the pool much harder
 that would thin niche topics badly, and it would not have caught the USA Today
 ad anyway.
 
+## Addon artwork
+
+The manifest spec is specific about these, and a client that enforces it
+refuses a non-conforming image and falls back to a generated letter avatar —
+an "N on purple" where the logo should be:
+
+| Field | Spec | Served |
+|---|---|---|
+| `logo` | PNG, 256×256 | 256×256 |
+| `background` | PNG/JPG, at least 1024×786 | 1920×1080 |
+
+Both are rendered from the SVGs in `public/`, which are the source of truth
+and double as the inline fallback art for articles with no image of their own.
+
+Asset URLs in the manifest carry the addon version (`/logo.png?v=0.6.1`).
+Stremio clients cache addon artwork by URL, so replacing the bytes at a fixed
+path leaves the old image on screen indefinitely — which is exactly how a
+stale placeholder outlives the asset that replaced it.
+
 ## Caching
 
 Three in-memory TTL stores, each with its own lifetime and purpose:
@@ -385,7 +404,7 @@ npm start           # http://localhost:3000/configure
 ```
 
 ```bash
-npm test            # 701 tests
+npm test            # 706 tests
 npm run test:coverage
 ```
 

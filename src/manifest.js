@@ -20,7 +20,7 @@ const CONTENT_TYPE = "news";
 const ID_PREFIXES = PROVIDERS.map((p) => p.idPrefix);
 
 const ADDON_ID = "org.deejay189393.newsio";
-const ADDON_VERSION = "0.6.0";
+const ADDON_VERSION = "0.6.1";
 const CONTACT_EMAIL = "deejay189393@users.noreply.github.com";
 const DESCRIPTION = "News on Stremio? Why not! Reads live headlines from newsdata.io, Currents and GNews.";
 
@@ -150,8 +150,12 @@ function baseManifest(baseUrl) {
     version: ADDON_VERSION,
     name: "Newsio",
     description: DESCRIPTION,
-    logo: `${baseUrl}/logo.png`,
-    background: `${baseUrl}/background.png`,
+    // Versioned so a client that cached an earlier logo re-fetches it.
+    // Stremio clients cache addon artwork by URL, so replacing the bytes at
+    // a fixed path leaves the old image on screen indefinitely -- which is
+    // exactly how a stale placeholder outlives the asset it replaced.
+    logo: `${baseUrl}/logo.png?v=${ADDON_VERSION}`,
+    background: `${baseUrl}/background.png?v=${ADDON_VERSION}`,
     contactEmail: CONTACT_EMAIL,
     resources: ["catalog", "meta", "stream"],
     types: [CONTENT_TYPE],
