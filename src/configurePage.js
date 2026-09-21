@@ -2,6 +2,9 @@ const { LANGUAGES, PROVIDERS } = require("./providers");
 const { PRESET_TOPICS, normalizeTopics, MAX_CUSTOM_TOPICS, MAX_QUERY_LENGTH } = require("./topics");
 const { validYoutubePlayback } = require("./config");
 
+/** Where the addon's source lives, linked from the footer. */
+const REPO_URL = "https://github.com/deejay189393/newsio";
+
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({
     "&": "&amp;",
@@ -147,6 +150,12 @@ function renderConfigurePage({ baseUrl, existing }) {
     padding: 11px 12px; border-radius: 9px; font-size: 15px;
   }
   input:focus, select:focus { outline: 2px solid var(--accent-2); }
+  footer { margin: 26px 0 8px; text-align: center; }
+  footer a {
+    display: inline-flex; align-items: center; gap: 7px; color: var(--muted);
+    font-size: 13px; text-decoration: none;
+  }
+  footer a:hover { color: var(--text); text-decoration: underline; }
   .key-row { display: flex; gap: 8px; align-items: stretch; }
   .key-row input { flex: 1 1 auto; min-width: 0; }
   .key-toggle {
@@ -297,6 +306,13 @@ function renderConfigurePage({ baseUrl, existing }) {
       <div class="hint">If the button does not open Stremio, paste the copied URL into Stremio's "Add addon" box.</div>
     </div>
   </div>
+
+  <footer>
+    <a href="${REPO_URL}" target="_blank" rel="noopener">
+      <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+      Source code on GitHub
+    </a>
+  </footer>
 </div>
 
 <script>
@@ -601,4 +617,4 @@ function renderConfigurePage({ baseUrl, existing }) {
 </html>`;
 }
 
-module.exports = { renderConfigurePage, escapeHtml, jsonForScript, orderedProviders };
+module.exports = { renderConfigurePage, escapeHtml, jsonForScript, orderedProviders, REPO_URL };

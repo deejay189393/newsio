@@ -14,8 +14,8 @@ beforeEach(() => {
 });
 
 describe("manifest basics", () => {
-  test("version is 0.9.0", () => {
-    expect(M.ADDON_VERSION).toBe("0.9.0");
+  test("version is 0.9.1", () => {
+    expect(M.ADDON_VERSION).toBe("0.9.1");
   });
 
   test("uses the short addon description", () => {

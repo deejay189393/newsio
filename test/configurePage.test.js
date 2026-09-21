@@ -1,4 +1,4 @@
-const { renderConfigurePage, escapeHtml, orderedProviders } = require("../src/configurePage");
+const { renderConfigurePage, escapeHtml, orderedProviders, REPO_URL } = require("../src/configurePage");
 const { TOPICS, LANGUAGES, PROVIDERS } = require("../src/providers");
 
 const BASE = "https://newsio.up.railway.app";
@@ -267,5 +267,32 @@ describe("API keys can be revealed", () => {
       existing: { sources: [{ provider: "youtube", apiKey: "AIzaSECRET" }], topics: [], language: "en" }
     });
     expect(markup).toContain('value="AIzaSECRET"');
+  });
+});
+
+describe("the source is easy to find", () => {
+  test("the page links to the GitHub repository", () => {
+    const markup = renderConfigurePage({ baseUrl: BASE, existing: null });
+    expect(markup).toContain(`href="${REPO_URL}"`);
+    expect(markup).toContain("Source code on GitHub");
+  });
+
+  test("the link opens in a new tab, without handing over the opener", () => {
+    const markup = renderConfigurePage({ baseUrl: BASE, existing: null });
+    const footer = markup.slice(markup.indexOf("<footer>"), markup.indexOf("</footer>"));
+    expect(footer).toContain('target="_blank"');
+    expect(footer).toContain('rel="noopener"');
+  });
+
+  test("it is there when reconfiguring too", () => {
+    const markup = renderConfigurePage({
+      baseUrl: BASE,
+      existing: { sources: [], topics: [], language: "en" }
+    });
+    expect(markup).toContain(REPO_URL);
+  });
+
+  test("the URL is the real repository", () => {
+    expect(REPO_URL).toBe("https://github.com/deejay189393/newsio");
   });
 });
