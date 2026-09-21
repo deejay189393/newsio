@@ -449,13 +449,22 @@ function toVideoStream(article) {
  * leans on an undocumented YouTube API. If that breaks, flipping the setting
  * puts the YouTube app back on the play button without waiting for a fix.
  */
-function toStreams(article, { baseUrl, youtubePlayback = "app" } = {}) {
+function toStreams(article, { baseUrl, youtubePlayback = "app", youtubeHealthy = true } = {}) {
   const youtubeId = article.provider === "youtube" && baseUrl ? youtubeIdOf(article) : null;
   if (youtubeId) {
+    // In-app playback depends on YouTube being willing to serve this host,
+    // and it sometimes is not. When the last attempt was refused, the
+    // working option leads and the other says why, so the first thing the
+    // viewer selects plays rather than erroring.
+    const down = !youtubeHealthy;
     const inApp = {
       name: "Newsio",
-      title: `Play video in app (${article.sourceName})`,
-      description: `Play video in app (${article.sourceName})`,
+      title: down
+        ? `Play video in app — unavailable right now (${article.sourceName})`
+        : `Play video in app (${article.sourceName})`,
+      description: down
+        ? "YouTube is refusing to serve this server at the moment. Try the YouTube app instead."
+        : `Play video in app (${article.sourceName})`,
       url: `${baseUrl}/yt/${youtubeId}/manifest.mpd`,
       behaviorHints: { filename: `${youtubeId}.mpd` }
     };
@@ -465,7 +474,9 @@ function toStreams(article, { baseUrl, youtubePlayback = "app" } = {}) {
       description: `Open in YouTube app (${article.sourceName})`,
       externalUrl: article.link
     };
-    return youtubePlayback === "youtube" ? [inYouTube, inApp] : [inApp, inYouTube];
+    // The user's preference decides the order, except when the option they
+    // preferred is the one that is currently broken.
+    return youtubePlayback === "youtube" || down ? [inYouTube, inApp] : [inApp, inYouTube];
   }
 
   const streams = [];
