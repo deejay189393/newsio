@@ -65,6 +65,23 @@ describe("renderConfigurePage — first-time configuration", () => {
     expect(html).toContain("in this order");
   });
 
+  // The example a user is shown is the one most will reach for first, so it
+  // should read as an ordinary interest rather than a loaded one.
+  test("suggests a neutral example, in both the placeholder and the hint", () => {
+    expect(html).toContain('placeholder="FIFA World Cup"');
+    expect(html).toContain('"FIFA World Cup", "Arsenal", "semiconductor exports"');
+  });
+
+  test("suggests nothing with a negative connotation", () => {
+    expect(html).not.toMatch(/placeholder="[^"]*crime/i);
+    expect(html.toLowerCase()).not.toContain("london crime");
+  });
+
+  test("each key field is labelled once, without a doubled word", () => {
+    PROVIDERS.forEach((p) => expect(html).toContain(`aria-label="${escapeHtml(p.label)} key"`));
+    expect(html).not.toContain("API API key");
+  });
+
   test("lists every supported language", () => {
     LANGUAGES.forEach((l) => expect(html).toContain(`value="${l.code}"`));
   });

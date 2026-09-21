@@ -52,7 +52,7 @@ every fresher source is already spent.
   queries newsdata.io live across every category, rather than filtering a local
   list. The topic catalogs are browse-only.
 - **Custom topics.** Anything you type becomes a catalog of its own — a saved
-  search presented like any other shelf. "London crime", "Arsenal",
+  search presented like any other shelf. "FIFA World Cup", "Arsenal",
   "semiconductor exports". Up to 12 of them.
 - **You choose the catalog order.** Topics are an ordered list, and that order
   is the order the catalogs appear in Stremio. A custom topic can sit anywhere
@@ -167,17 +167,17 @@ URL contains every API key you entered, so don't share it publicly.**
 the catalogs appear in Stremio. It holds two kinds of entry.
 
 ```js
-topics: ["top", { q: "London crime" }, "technology"]
+topics: ["top", { q: "FIFA World Cup" }, "technology"]
 //        preset   custom                preset
 ```
 
 A **preset** is one of the curated subjects each provider maps to its own
 category vocabulary. A **custom topic** is free text, run as a standing search
-and presented as a catalog of its own — "London crime" is not a category any
+and presented as a catalog of its own — "FIFA World Cup" is not a category any
 news API has, but it is a perfectly good saved query.
 
-A custom topic's catalog id is derived from its text (`London crime` →
-`q_london-crime`) rather than generated, so re-saving an unchanged config does
+A custom topic's catalog id is derived from its text (`FIFA World Cup` →
+`q_fifa-world-cup`) rather than generated, so re-saving an unchanged config does
 not orphan catalogs Stremio has already installed. The `q_` prefix is also what
 keeps a custom topic from ever colliding with a preset id.
 
@@ -366,7 +366,7 @@ an "N on purple" where the logo should be:
 Both are rendered from the SVGs in `public/`, which are the source of truth
 and double as the inline fallback art for articles with no image of their own.
 
-Asset URLs in the manifest carry the addon version (`/logo.png?v=0.6.1`).
+Asset URLs in the manifest carry the addon version (`/logo.png?v=0.6.2`).
 Stremio clients cache addon artwork by URL, so replacing the bytes at a fixed
 path leaves the old image on screen indefinitely — which is exactly how a
 stale placeholder outlives the asset that replaced it.
@@ -404,7 +404,7 @@ npm start           # http://localhost:3000/configure
 ```
 
 ```bash
-npm test            # 706 tests
+npm test            # 709 tests
 npm run test:coverage
 ```
 

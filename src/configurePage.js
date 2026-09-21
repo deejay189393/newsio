@@ -74,7 +74,7 @@ function renderConfigurePage({ baseUrl, existing }) {
           </div>
         </div>
         <p class="source-note">${escapeHtml(provider.notes)}</p>
-        <input type="password" class="source-key" placeholder="${escapeHtml(provider.keyPlaceholder)}" value="${escapeHtml(key)}" aria-label="${escapeHtml(provider.label)} API key" />
+        <input type="password" class="source-key" placeholder="${escapeHtml(provider.keyPlaceholder)}" value="${escapeHtml(key)}" aria-label="${escapeHtml(provider.label)} key" />
         <div class="source-links"><a href="${escapeHtml(provider.signupUrl)}" target="_blank" rel="noopener">Get a free ${escapeHtml(provider.label)} key</a></div>
       </div>`;
     })
@@ -237,11 +237,11 @@ function renderConfigurePage({ baseUrl, existing }) {
       <div class="preset-chips" id="preset-chips"></div>
       <div class="sub-label">Add a custom topic</div>
       <div class="add-row">
-        <input type="text" id="custom-topic" maxlength="${MAX_QUERY_LENGTH}" placeholder="London crime" aria-label="Custom topic" />
+        <input type="text" id="custom-topic" maxlength="${MAX_QUERY_LENGTH}" placeholder="FIFA World Cup" aria-label="Custom topic" />
         <button type="button" id="add-custom">+ Add</button>
       </div>
       <div class="hint">
-        A custom topic is a saved search — "London crime", "Arsenal", "semiconductor exports".
+        A custom topic is a saved search — "FIFA World Cup", "Arsenal", "semiconductor exports".
         Up to ${MAX_CUSTOM_TOPICS} of them. Search is also available as its own catalog covering
         everything, and every catalog pages 20 stories at a time. Not every source carries
         every topic — Newsio simply skips a source that cannot serve one.
