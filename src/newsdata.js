@@ -32,6 +32,57 @@ const MAX_PAGE_WALK = 12;
  */
 const PAID_PLAN_PLACEHOLDER = /^ONLY AVAILABLE IN [A-Z ]+PLANS?$/i;
 
+/**
+ * There is no ad flag in this API.
+ *
+ * Tested directly: newsdata.io exposes `datatype` (news / blog / review /
+ * multimedia / podcast / analysis) and a `duplicate` boolean, and nothing
+ * that marks sponsored or affiliate content. A plain affiliate post --
+ * "Power outages happen: save up to 57% on EcoFlow power stations", USA
+ * Today -- arrives as datatype "news", indistinguishable from reporting.
+ * So the two deterministic signals that do exist are used instead.
+ *
+ * 1. `source_priority` ranks the publisher; lower is more reputable (Google
+ *    News 14, CNN 165) and the SEO content farms sit orders of magnitude
+ *    higher (5,143,682 for the outlet behind "Contrasting SK hynix (SKHY)
+ *    and Its Competitors"; 99,999,999 for another). The cut is deliberately
+ *    far above every genuine outlet observed -- Qatar Tribune, the least
+ *    reputable real publisher in the sample, sits at 1,200,410.
+ * 2. Commerce wording that reporting does not use. Kept narrow on purpose:
+ *    a discount mentioned in a headline is news ("Government cuts rail
+ *    fares by 50%"), so only retail phrasing counts.
+ *
+ * Neither is a substitute for a flag the API does not provide, and an
+ * affiliate post from a reputable outlet still gets through.
+ */
+const LOW_QUALITY_SOURCE_PRIORITY = 2000000;
+
+const COMMERCE_PHRASES = [
+  /\bsave up to\b/i,
+  /\b\d{1,3}% off\b/i,
+  /\bbest deals?\b/i,
+  /\bdeal of the (day|week)\b/i,
+  /\btop deals\b/i,
+  /\bcoupon(s| code)?\b/i,
+  /\bshop now\b/i,
+  /\bon sale now\b/i,
+  /\bdiscount code\b/i,
+  /\bprime day deals?\b/i,
+  /\bblack friday deals?\b/i
+];
+
+/**
+ * Filters what the API will not: SEO content farms, and retail posts
+ * dressed as stories.
+ */
+function isLowQuality(article) {
+  if (typeof article.sourcePriority === "number" && article.sourcePriority > LOW_QUALITY_SOURCE_PRIORITY) {
+    return true;
+  }
+  const text = `${article.title || ""} ${article.description || ""}`;
+  return COMMERCE_PHRASES.some((pattern) => pattern.test(text));
+}
+
 function realText(value) {
   const text = typeof value === "string" ? value.trim() : "";
   return !text || PAID_PLAN_PLACEHOLDER.test(text) ? "" : text;
@@ -63,8 +114,12 @@ function normalizeArticle(raw) {
     videoUrl: raw.video_url || null,
     pubDate: raw.pubDate || null,
     sourceName: realText(raw.source_name) || realText(raw.source_id) || "Unknown source",
+    sourceId: realText(raw.source_id) || null,
+    sourcePriority: typeof raw.source_priority === "number" ? raw.source_priority : null,
     sourceIcon: raw.source_icon || null,
     category: Array.isArray(raw.category) ? raw.category[0] : raw.category || null,
+    // The full list, not just the first: the first is usually "top".
+    categories: Array.isArray(raw.category) ? raw.category.filter((c) => typeof c === "string") : [],
     keywords: Array.isArray(raw.keywords) ? raw.keywords.filter((k) => typeof k === "string") : [],
     creator: Array.isArray(raw.creator) ? raw.creator.join(", ") : realText(raw.creator) || null
   };
@@ -229,7 +284,14 @@ async function fetchNews({ apiKey, category, query, language, skip = 0 }) {
     if (!carried) break;
   }
 
-  const articles = collected.slice(offsetWithinFirstPage, offsetWithinFirstPage + CATALOG_PAGE_SIZE);
+  // Sliced before filtering, deliberately: the slice positions come from
+  // unfiltered upstream order, so each catalog page maps to a fixed span of
+  // upstream results no matter what is dropped. Filtering first would make
+  // the span drift and pages would start overlapping. The cost is that a
+  // page can come back a little short, which is the right trade.
+  const articles = collected
+    .slice(offsetWithinFirstPage, offsetWithinFirstPage + CATALOG_PAGE_SIZE)
+    .filter((article) => !isLowQuality(article));
   return { articles, hasMore: hasMore || collected.length > offsetWithinFirstPage + CATALOG_PAGE_SIZE, truncated: false };
 }
 
@@ -267,6 +329,8 @@ module.exports = {
   normalizeArticle,
   makeArticleId,
   realText,
+  isLowQuality,
+  LOW_QUALITY_SOURCE_PRIORITY,
   UPSTREAM_PAGE_SIZE,
   CATALOG_PAGE_SIZE,
   MAX_PAGE_WALK

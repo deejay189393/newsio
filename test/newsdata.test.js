@@ -5,6 +5,8 @@ const {
   normalizeArticle,
   makeArticleId,
   realText,
+  isLowQuality,
+  LOW_QUALITY_SOURCE_PRIORITY,
   UPSTREAM_PAGE_SIZE,
   CATALOG_PAGE_SIZE,
   MAX_PAGE_WALK
@@ -74,8 +76,11 @@ describe("normalizeArticle", () => {
       videoUrl: "https://e.com/v.mp4",
       pubDate: "2026-09-18 10:00:00",
       sourceName: "Src",
+      sourceId: null,
+      sourcePriority: null,
       sourceIcon: "https://e.com/ico.png",
       category: "technology",
+      categories: ["technology"],
       keywords: ["chips", "ai"],
       creator: "Jane, John"
     });
@@ -151,6 +156,32 @@ describe("normalizeArticle", () => {
     expect(n.creator).toBeNull();
     expect(n.title).toBe("Untitled");
     expect(n.keywords).toEqual([]);
+    expect(n.categories).toEqual([]);
+    expect(n.sourceId).toBeNull();
+  });
+
+  test("keeps the whole category list, not just the first entry", () => {
+    // The first is almost always "top", which is a feed designation.
+    expect(normalizeArticle({ article_id: "x", category: ["top", "technology"] }).categories).toEqual([
+      "top",
+      "technology"
+    ]);
+    expect(normalizeArticle({ article_id: "x", category: ["top", "technology"] }).category).toBe("top");
+  });
+
+  test("carries source_id so a publisher's own tag can be recognised", () => {
+    expect(normalizeArticle({ article_id: "x", source_id: "dailymail" }).sourceId).toBe("dailymail");
+  });
+
+  test("carries source_priority, and only when it is a number", () => {
+    expect(normalizeArticle({ article_id: "x", source_priority: 165 }).sourcePriority).toBe(165);
+    expect(normalizeArticle({ article_id: "x", source_priority: "165" }).sourcePriority).toBeNull();
+    expect(normalizeArticle({ article_id: "x" }).sourcePriority).toBeNull();
+  });
+
+  test("a non-array category field yields an empty categories list", () => {
+    expect(normalizeArticle({ article_id: "x", category: "tech" }).categories).toEqual([]);
+    expect(normalizeArticle({ article_id: "x", category: ["a", 5, "b"] }).categories).toEqual(["a", "b"]);
   });
 
   test("descriptions are never truncated by us", () => {
@@ -397,6 +428,118 @@ describe("fetchNews — query shape", () => {
 
   test("requires an API key", async () => {
     await expect(fetchNews({ category: "top" })).rejects.toMatchObject({ status: 401 });
+  });
+});
+
+describe("quality filtering — what the API will not flag", () => {
+  // newsdata.io has no sponsored/advertisement marker: datatype covers
+  // news/blog/review/multimedia/podcast/analysis and nothing else, and a
+  // plain affiliate post arrives as datatype "news". These are the two
+  // deterministic signals that do exist.
+  const art = (over) => normalizeArticle({ article_id: "x", title: "T", description: "D", ...over });
+
+  describe("SEO content farms, by source_priority", () => {
+    test.each([
+      ["a content farm", 99999999, true],
+      ["a stock-spam aggregator", 5143682, true],
+      ["just over the line", LOW_QUALITY_SOURCE_PRIORITY + 1, true],
+      ["exactly on the line", LOW_QUALITY_SOURCE_PRIORITY, false],
+      ["a minor real publisher", 1200410, false],
+      ["CNN", 165, false],
+      ["Google News", 14, false]
+    ])("%s (priority %p) -> dropped=%p", (_label, source_priority, expected) => {
+      expect(isLowQuality(art({ source_priority }))).toBe(expected);
+    });
+
+    test("a story with no title or description is judged on its source alone", () => {
+      expect(isLowQuality({})).toBe(false);
+      expect(isLowQuality({ sourcePriority: 99999999 })).toBe(true);
+      expect(isLowQuality({ title: null, description: null })).toBe(false);
+    });
+
+    test("a missing source_priority is never grounds to drop a story", () => {
+      expect(isLowQuality(art({}))).toBe(false);
+      expect(isLowQuality(art({ source_priority: "not a number" }))).toBe(false);
+    });
+  });
+
+  describe("retail posts dressed as stories", () => {
+    test.each([
+      "Power outages happen—save up to 57% on EcoFlow power stations",
+      "The best deals on laptops this weekend",
+      "Deal of the day: noise-cancelling headphones",
+      "Grab this coupon code before midnight",
+      "Shop now and save",
+      "Top deals for the long weekend",
+      "Prime Day deals you can still get",
+      "Black Friday deals are live"
+    ])("drops %p", (title) => {
+      expect(isLowQuality(art({ title }))).toBe(true);
+    });
+
+    test("catches an ad embedded in the description, not just the headline", () => {
+      const embedded = art({
+        title: "How to watch Cleveland Browns vs. Tampa Bay Buccaneers",
+        description: "Start streaming DIRECTV & save up to $30 off your 1st mo. of service!"
+      });
+      expect(isLowQuality(embedded)).toBe(true);
+    });
+
+    // Kept narrow on purpose: a discount in a headline is often the news.
+    test.each([
+      "Government cuts rail fares by 50% from Monday",
+      "Retailer reports a 30% fall in quarterly profit",
+      "Shoppers spent less this Black Friday, data shows",
+      "Inflation eases as food prices drop",
+      "A review of the new flagship phone"
+    ])("keeps genuine reporting: %p", (title) => {
+      expect(isLowQuality(art({ title }))).toBe(false);
+    });
+  });
+
+  test("filtered stories do not reach a catalog page", async () => {
+    global.fetch = jest.fn().mockResolvedValueOnce(
+      ok({
+        results: [
+          { article_id: "good1", title: "Real news", link: "https://e/1", source_priority: 100 },
+          { article_id: "farm", title: "Farm piece", link: "https://e/2", source_priority: 99999999 },
+          { article_id: "ad", title: "Save up to 40% on blenders", link: "https://e/3", source_priority: 100 },
+          { article_id: "good2", title: "More real news", link: "https://e/4", source_priority: 100 }
+        ],
+        nextPage: null
+      })
+    );
+    const res = await fetchNews({ apiKey: "K", category: "top" });
+    expect(res.articles.map((a) => a.id)).toEqual(["nd_good1", "nd_good2"]);
+  });
+
+  // Filtering after the slice keeps each catalog page mapped to a fixed span
+  // of upstream results; filtering before it would make pages drift and
+  // start overlapping.
+  test("filtering never makes two pages overlap", async () => {
+    const page = (start, next) =>
+      ok({
+        results: Array.from({ length: 10 }, (_, k) => ({
+          article_id: `a${start + k}`,
+          title: k % 3 === 0 ? "Best deals of the week" : `Story ${start + k}`,
+          link: `https://e/${start + k}`,
+          source_priority: 100
+        })),
+        nextPage: next
+      });
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(page(0, "T1"))
+      .mockResolvedValueOnce(page(10, "T2"))
+      .mockResolvedValueOnce(page(20, "T3"))
+      .mockResolvedValueOnce(page(30, null));
+
+    const p1 = await fetchNews({ apiKey: "K", category: "top", skip: 0 });
+    const p2 = await fetchNews({ apiKey: "K", category: "top", skip: 20 });
+    const first = new Set(p1.articles.map((a) => a.id));
+    expect(p2.articles.filter((a) => first.has(a.id))).toEqual([]);
+    expect(p1.articles.length).toBeLessThan(CATALOG_PAGE_SIZE); // some were dropped
+    expect(p1.articles.every((a) => !/best deals/i.test(a.title))).toBe(true);
   });
 });
 
