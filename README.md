@@ -17,15 +17,23 @@ real metadata for every story and a playable stream when the story has video.
   whole addon, so a query returns one result row -- labelled **Newsio** -- that
   queries newsdata.io live across every category, rather than filtering a local
   list. The topic catalogs are browse-only.
-- **Pagination.** Catalogs declare `skip`, and Newsio translates Stremio's
-  numeric offset into newsdata.io's cursor-based paging (see *Pagination* below).
+- **20 stories per page, and pagination that works.** Catalogs declare `skip`
+  *with explicit step options*, which is what lets a page be anything other
+  than 100 items (see *Pagination* below).
+- **No syndicated duplicates.** newsdata.io is asked to collapse the same story
+  republished by a dozen outlets (`removeduplicate`), which on a technology
+  feed drops the result count by about a third.
 - **Real metadata per item** — title, description, poster, backdrop, publish
   date, genre, source and author links — served from the addon's own `meta`
   handler.
-- **Video stories are marked in the title.** A story with a playable video has
-  its headline prefixed with a **`▶`**, and its first stream plays that video.
-  The marker goes on the title because the title is the only text a catalog grid
-  shows under a poster. Every story also offers a "read the article" link.
+- **Video stories are marked in the title — and actually play.** A story whose
+  video Stremio can really open has its headline prefixed with a **`▶`**, and
+  its first stream is a `url` (direct media) or `ytId` (YouTube), so the player
+  opens it. The marker goes on the title because that is the only text a
+  catalog grid shows under a poster, and it appears *only* when playback will
+  genuinely work: newsdata.io also returns embed pages, which can only be
+  handed to a browser and so are left unmarked. Every story also offers a
+  "read the article" link.
 - **Configuration is mandatory.** The manifest sets
   `behaviorHints.configurationRequired`, so Stremio hides *Install* entirely and
   shows *Configure* instead, pointing at `/configure`. A configuration only
@@ -66,7 +74,7 @@ in search, the same as other non-video addons.
 | `GET /:config/configure` | Re-configuration, pre-filled from your current settings |
 | `GET /manifest.json` | Unconfigured manifest (tells Stremio setup is required) |
 | `GET /:config/manifest.json` | Your manifest: one catalog per selected topic |
-| `GET /:config/catalog/news/:topic/:extra?.json` | Headlines for one topic; handles `skip` |
+| `GET /:config/catalog/news/:topic/:extra?.json` | Headlines for one topic (20 per page); handles `skip` |
 | `GET /:config/catalog/news/search/search=:q.json` | The addon-wide search catalog |
 | `GET /:config/meta/news/:id.json` | Full metadata for one story |
 | `GET /:config/stream/news/:id.json` | Video stream (if any) + article link |
@@ -95,16 +103,47 @@ URL contains your API key, so don't share it publicly.**
 
 ## Pagination
 
-newsdata.io pages with an opaque `nextPage` cursor, not a page number — each
-response only reveals the token for the *next* page. Stremio, meanwhile, asks
-for a numeric `skip`. Newsio bridges the two by walking the cursor chain and
-caching each page's token as it goes, so:
+Two mismatches have to be bridged here, and getting either wrong breaks
+scrolling entirely.
 
-- scrolling forward costs exactly one upstream call per new page,
+**Upstream:** newsdata.io pages with an opaque `nextPage` cursor, not a page
+number — each response only reveals the token for the *next* page, and returns
+at most 10 articles (its `size` parameter is rejected outright above that on
+the free tier). So a 20-item catalog page is assembled from two upstream calls,
+and reaching page N means having walked 0..N-1.
+
+**Downstream:** `skip` is an absolute item offset, not a page number. Crucially,
+the addon protocol says *"the standard page size in Stremio is 100, so the skip
+value will be a multiple of 100; if you return less than 100 items, Stremio will
+consider this to be the end of the catalog."* A 20-item page with no declared
+step is therefore treated as the **entire** catalog — scrolling never asks for
+more. Newsio declares `skip` with explicit `options` (`"0"`, `"20"`, `"40"`, …),
+which is the documented way to set a page size other than 100 and is what makes
+pagination work at all.
+
+Each page's cursor is cached as it is walked, so:
+
+- scrolling forward costs exactly two upstream calls per new page,
 - revisiting a page costs none,
-- and a deep, never-before-seen jump is capped at 5 sequential upstream calls,
-  so one request can't burn your whole rate limit (past that it returns an
-  empty page rather than hammering the API).
+- a page already known to be the last ends pagination without a call,
+- and a deep, never-before-seen jump is capped (`MAX_PAGE_WALK`) so one request
+  can't burn your whole rate limit.
+
+`skip` is honoured exactly, including values that don't land on a page
+boundary: the offset is mapped onto upstream pages by arithmetic and the
+result sliced, rather than rounded down to the containing page.
+
+## Article text
+
+Newsio never truncates. `description` is served in full — it runs to roughly a
+thousand characters on some stories — and the detail page adds a
+`source · byline · date` line beneath it, with the story's own keywords
+surfaced as genres.
+
+One thing to know about the free tier: newsdata.io fills `content`,
+`ai_summary` and several other fields with the literal string
+`ONLY AVAILABLE IN PAID PLANS`. Those are treated as absent, so an upsell
+string can never reach a reader as though it were the article.
 
 ## Caching
 
@@ -136,7 +175,7 @@ npm start           # http://localhost:3000/configure
 ```
 
 ```bash
-npm test            # 296 tests
+npm test            # 357 tests
 npm run test:coverage
 ```
 
@@ -223,7 +262,8 @@ semver `version`, `name`, `description`, `logo`, `background` and `contactEmail`
 
 ## Notes
 
-- **newsdata.io free tier** is rate-limited and returns 10 articles per request.
+- **newsdata.io free tier** is rate-limited and returns 10 articles per request,
+  so each 20-item catalog page costs two API credits (cached for 10 minutes).
   The caching above is tuned to stay within it. Empty catalogs usually mean a
   spent quota or a bad key — check your newsdata.io dashboard.
 - **Articles aren't video files.** Most stories open in your browser via

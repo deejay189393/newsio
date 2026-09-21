@@ -1,7 +1,7 @@
 const request = require("supertest");
 const { clearAllCaches } = require("../src/cache");
 const { encodeConfig } = require("../src/config");
-const { PAGE_SIZE } = require("../src/newsdata");
+const { CATALOG_PAGE_SIZE, UPSTREAM_PAGE_SIZE } = require("../src/newsdata");
 
 let app;
 beforeEach(() => {
@@ -60,7 +60,7 @@ describe("manifest routes", () => {
     const res = await request(app).get("/manifest.json");
     expect(res.status).toBe(200);
     expect(res.body.id).toBe("org.deejay189393.newsio");
-    expect(res.body.version).toBe("0.2.2");
+    expect(res.body.version).toBe("0.3.0");
     expect(res.body.catalogs).toEqual([]);
     expect(res.body.behaviorHints.configurationRequired).toBe(true);
     expect(res.body.types).toEqual(["news"]);
@@ -139,7 +139,10 @@ describe("manifest routes", () => {
       type: "news",
       id: "search",
       name: "Newsio",
-      extra: [{ name: "search", isRequired: true }, { name: "skip" }]
+      extra: [
+        { name: "search", isRequired: true },
+        { name: "skip", options: require("../src/manifest").SKIP_OPTIONS }
+      ]
     });
   });
 
@@ -219,26 +222,47 @@ describe("catalog route", () => {
     expect(url.searchParams.get("category")).toBe("technology");
   });
 
-  test("supports skip-based pagination", async () => {
-    global.fetch = jest
-      .fn()
-      .mockResolvedValueOnce(ok({ results: [article("a1")], nextPage: "T1" }))
-      .mockResolvedValueOnce(ok({ results: [article("a2")], nextPage: null }));
-    const cfg = CFG();
-    await request(app).get(`/${cfg}/catalog/news/technology.json`);
-    const res = await request(app).get(`/${cfg}/catalog/news/technology/skip=${PAGE_SIZE}.json`);
-    expect(res.body.metas[0].id).toBe("nd_a2");
+  const upstream = (start, next) =>
+    ok({ results: Array.from({ length: UPSTREAM_PAGE_SIZE }, (_, k) => article(`a${start + k}`)), nextPage: next });
+
+  test("a catalog page is 20 items, assembled from two upstream pages", async () => {
+    global.fetch = jest.fn().mockResolvedValueOnce(upstream(0, "T1")).mockResolvedValueOnce(upstream(10, "T2"));
+    const res = await request(app).get(`/${CFG()}/catalog/news/technology.json`);
+    expect(res.body.metas).toHaveLength(CATALOG_PAGE_SIZE);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 
-  test("supports search and skip combined in one extra segment", async () => {
+  test("supports skip-based pagination with no overlap between pages", async () => {
     global.fetch = jest
       .fn()
-      .mockResolvedValueOnce(ok({ results: [article("s1")], nextPage: "T1" }))
-      .mockResolvedValueOnce(ok({ results: [article("s2")], nextPage: null }));
+      .mockResolvedValueOnce(upstream(0, "T1"))
+      .mockResolvedValueOnce(upstream(10, "T2"))
+      .mockResolvedValueOnce(upstream(20, "T3"))
+      .mockResolvedValueOnce(upstream(30, null));
     const cfg = CFG();
-    await request(app).get(`/${cfg}/catalog/news/technology/search=chips.json`);
-    const res = await request(app).get(`/${cfg}/catalog/news/technology/search=chips&skip=${PAGE_SIZE}.json`);
-    expect(res.body.metas[0].id).toBe("nd_s2");
+    const p1 = await request(app).get(`/${cfg}/catalog/news/technology.json`);
+    const p2 = await request(app).get(`/${cfg}/catalog/news/technology/skip=${CATALOG_PAGE_SIZE}.json`);
+    expect(p1.body.metas[0].id).toBe("nd_a0");
+    expect(p2.body.metas[0].id).toBe("nd_a20");
+    expect(p2.body.metas).toHaveLength(CATALOG_PAGE_SIZE);
+    const first = new Set(p1.body.metas.map((m) => m.id));
+    expect(p2.body.metas.filter((m) => first.has(m.id))).toEqual([]);
+  });
+
+  test("search paginates with skip, with no overlap between pages", async () => {
+    global.fetch = jest
+      .fn()
+      .mockResolvedValueOnce(upstream(0, "T1"))
+      .mockResolvedValueOnce(upstream(10, "T2"))
+      .mockResolvedValueOnce(upstream(20, "T3"))
+      .mockResolvedValueOnce(upstream(30, null));
+    const cfg = CFG();
+    const p1 = await request(app).get(`/${cfg}/catalog/news/search/search=chips.json`);
+    const p2 = await request(app).get(`/${cfg}/catalog/news/search/search=chips&skip=${CATALOG_PAGE_SIZE}.json`);
+    expect(p1.body.metas).toHaveLength(CATALOG_PAGE_SIZE);
+    expect(p2.body.metas[0].id).toBe("nd_a20");
+    const first = new Set(p1.body.metas.map((m) => m.id));
+    expect(p2.body.metas.filter((m) => first.has(m.id))).toEqual([]);
   });
 
   test("sets a Cache-Control header from the handler's cache hint", async () => {
@@ -297,7 +321,8 @@ describe("meta route", () => {
     );
     const res = await request(app).get(`/${CFG()}/meta/news/nd_v1.json`);
     expect(res.body.meta.name).toBe("\u25b6 Title v1");
-    expect(res.body.meta.description).toBe("Watch this.");
+    expect(res.body.meta.description.startsWith("Watch this.")).toBe(true);
+    expect(res.body.meta.description).not.toMatch(/\[VIDEO\]/);
   });
 
   test("leaves a text-only article's name unmarked", async () => {
@@ -306,7 +331,7 @@ describe("meta route", () => {
       .mockResolvedValue(ok({ results: [article("t1", { description: "Read this.", video_url: null })] }));
     const res = await request(app).get(`/${CFG()}/meta/news/nd_t1.json`);
     expect(res.body.meta.name).toBe("Title t1");
-    expect(res.body.meta.description).toBe("Read this.");
+    expect(res.body.meta.description.startsWith("Read this.")).toBe(true);
   });
 
   test("returns a 500-class error for an article that cannot be resolved", async () => {
@@ -326,7 +351,11 @@ describe("stream route", () => {
     const res = await request(app).get(`/${cfg}/stream/news/nd_a1.json`);
     expect(res.status).toBe(200);
     expect(res.body.streams).toHaveLength(2);
-    expect(res.body.streams[0].externalUrl).toBe("https://e.com/a1.mp4");
+    // A real media file must arrive as `url` so the player opens it; as an
+    // externalUrl it would only ever bounce out to a browser.
+    expect(res.body.streams[0].url).toBe("https://e.com/a1.mp4");
+    expect(res.body.streams[0].externalUrl).toBeUndefined();
+    expect(res.body.streams[1].externalUrl).toBe("https://example.com/a1");
   });
 
   test("returns a single read-article stream for a text story", async () => {
@@ -397,6 +426,6 @@ describe("end-to-end user journey", () => {
 
     // 5. user hits play -> a video stream exists for that id
     const stream = await request(app).get(`/${cfg}/stream/news/${item.id}.json`);
-    expect(stream.body.streams[0].externalUrl).toBe("https://e.com/j1.mp4");
+    expect(stream.body.streams[0].url).toBe("https://e.com/j1.mp4");
   });
 });

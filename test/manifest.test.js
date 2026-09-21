@@ -13,8 +13,8 @@ beforeEach(() => {
 });
 
 describe("manifest basics", () => {
-  test("version is 0.2.2", () => {
-    expect(M.ADDON_VERSION).toBe("0.2.2");
+  test("version is 0.3.0", () => {
+    expect(M.ADDON_VERSION).toBe("0.3.0");
   });
 
   test("uses the short addon description", () => {
@@ -82,7 +82,7 @@ describe("configured manifest", () => {
     const m = M.buildManifest({ apiKey: KEY, topics: ["technology"] }, BASE_URL);
     topicCatalogs(m).forEach((c) => {
       expect(c.type).toBe("news");
-      expect(c.extra).toEqual([{ name: "skip" }]);
+      expect(c.extra).toEqual([{ name: "skip", options: M.SKIP_OPTIONS }]);
       expect(c.extra.some((e) => e.name === "search")).toBe(false);
     });
   });
@@ -106,7 +106,10 @@ describe("configured manifest", () => {
 
   test("the search catalog marks search required so it is not a browsable shelf", () => {
     const m = M.buildManifest({ apiKey: KEY, topics: ["top"] }, BASE_URL);
-    expect(searchCatalogOf(m).extra).toEqual([{ name: "search", isRequired: true }, { name: "skip" }]);
+    expect(searchCatalogOf(m).extra).toEqual([
+      { name: "search", isRequired: true },
+      { name: "skip", options: M.SKIP_OPTIONS }
+    ]);
   });
 
   test("the search catalog is appended once, after the topics", () => {
@@ -164,6 +167,42 @@ describe("configured manifest", () => {
     expect(M.buildManifest({ apiKey: KEY, topics: ["top"] }, BASE_URL).id).toBe(M.ADDON_ID);
     expect(M.getUnconfiguredManifest(BASE_URL).id).toBe(M.ADDON_ID);
     expect(M.buildInterfaceManifest().id).toBe(M.ADDON_ID);
+  });
+});
+
+describe("pagination is declared to the client", () => {
+  const { CATALOG_PAGE_SIZE } = require("../src/newsdata");
+
+  // Without declared options the protocol says the client assumes a page
+  // size of 100 AND treats a shorter page as the end of the catalog -- so a
+  // 20-item page would never paginate at all.
+  test("skip options step by exactly one catalog page", () => {
+    expect(M.SKIP_OPTIONS[0]).toBe("0");
+    M.SKIP_OPTIONS.forEach((opt, i) => expect(opt).toBe(String(i * CATALOG_PAGE_SIZE)));
+  });
+
+  test("the steps are strings, as the protocol requires", () => {
+    M.SKIP_OPTIONS.forEach((o) => expect(typeof o).toBe("string"));
+  });
+
+  test("enough pages are offered to be a useful feed", () => {
+    expect(M.SKIP_OPTIONS).toHaveLength(M.CATALOG_PAGE_COUNT);
+    expect(M.CATALOG_PAGE_COUNT * CATALOG_PAGE_SIZE).toBeGreaterThanOrEqual(200);
+  });
+
+  test("every catalog -- topic and search alike -- declares the same steps", () => {
+    const m = M.buildManifest({ apiKey: KEY, topics: ["top", "world"] }, BASE_URL);
+    m.catalogs.forEach((c) => {
+      const skip = c.extra.find((e) => e.name === "skip");
+      expect(skip).toBeDefined();
+      expect(skip.options).toEqual(M.SKIP_OPTIONS);
+    });
+  });
+
+  test("the internal routing manifest declares them too", () => {
+    M.buildInterfaceManifest().catalogs.forEach((c) => {
+      expect(c.extra.find((e) => e.name === "skip").options).toEqual(M.SKIP_OPTIONS);
+    });
   });
 });
 

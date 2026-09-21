@@ -1,4 +1,5 @@
 const { TOPICS, getTopicById } = require("./topics");
+const { CATALOG_PAGE_SIZE } = require("./newsdata");
 
 /**
  * Custom content type, deliberately NOT "movie"/"series"/"channel".
@@ -11,7 +12,7 @@ const { TOPICS, getTopicById } = require("./topics");
 const CONTENT_TYPE = "news";
 
 const ADDON_ID = "org.deejay189393.newsio";
-const ADDON_VERSION = "0.2.2";
+const ADDON_VERSION = "0.3.0";
 const CONTACT_EMAIL = "deejay189393@users.noreply.github.com";
 const DESCRIPTION = "News on Stremio? Why not! Uses the newsdata.io API.";
 
@@ -33,12 +34,37 @@ const DESCRIPTION = "News on Stremio? Why not! Uses the newsdata.io API.";
 const SEARCH_CATALOG_ID = "search";
 const SEARCH_CATALOG_NAME = "Newsio";
 
+/**
+ * How many catalog pages the client is told it can walk through.
+ * 10 x 20 = 200 stories per catalog, which is far past where a news feed
+ * stops being useful and keeps a deep scroll from draining the API quota.
+ */
+const CATALOG_PAGE_COUNT = 10;
+
+/**
+ * The steps in which the client asks for more.
+ *
+ * This is not cosmetic. Without `options`, "the standard page size in
+ * Stremio is 100, so the skip value will be a multiple of 100" -- and,
+ * worse, "if you return less than 100 items, Stremio will consider this to
+ * be the end of the catalog". A 20-item page with no declared step is
+ * therefore treated as the entire catalog: scrolling never asks for more,
+ * and a client that does ask jumps straight to skip=100, five upstream
+ * pages past anything fetched. Declaring the steps is what makes a page
+ * size other than 100 paginate at all.
+ */
+const SKIP_OPTIONS = Array.from({ length: CATALOG_PAGE_COUNT }, (_, i) => String(i * CATALOG_PAGE_SIZE));
+
+function skipExtra() {
+  return { name: "skip", options: SKIP_OPTIONS };
+}
+
 function topicCatalog(topic) {
   return {
     type: CONTENT_TYPE,
     id: topic.id,
     name: topic.label,
-    extra: [{ name: "skip" }]
+    extra: [skipExtra()]
   };
 }
 
@@ -47,7 +73,7 @@ function searchCatalog() {
     type: CONTENT_TYPE,
     id: SEARCH_CATALOG_ID,
     name: SEARCH_CATALOG_NAME,
-    extra: [{ name: "search", isRequired: true }, { name: "skip" }]
+    extra: [{ name: "search", isRequired: true }, skipExtra()]
   };
 }
 
@@ -211,6 +237,8 @@ module.exports = {
   DESCRIPTION,
   SEARCH_CATALOG_ID,
   SEARCH_CATALOG_NAME,
+  SKIP_OPTIONS,
+  CATALOG_PAGE_COUNT,
   STREMIO_ADDONS_ISSUER,
   STREMIO_ADDONS_SIGNATURE
 };
