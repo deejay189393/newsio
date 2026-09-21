@@ -25,7 +25,8 @@ const CATEGORIES = {
   tourism: "travel",
   crime: null, // Currents has no equivalent; this source is skipped for it
   domestic: "regional",
-  other: "general"
+  other: "general",
+  video: null // no video field in this API at all
 };
 
 const LANGUAGES = ["en", "de", "fr", "es", "it", "pt", "nl", "ru", "zh", "ar", "hi", "ja", "ko"];

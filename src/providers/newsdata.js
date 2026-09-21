@@ -37,7 +37,10 @@ const CATEGORIES = {
   tourism: "tourism",
   crime: "crime",
   domestic: "domestic",
-  other: "other"
+  other: "other",
+  // Not a category: a filter across all news for stories that carry a
+  // playable video. newsdata.io is the only source that has one.
+  video: { video: 1 }
 };
 
 const LANGUAGES = ["en", "de", "fr", "es", "it", "pt", "nl", "ru", "zh", "ar", "hi", "ja", "ko"];
@@ -110,8 +113,12 @@ async function fetchPage({ apiKey, topic, query, language, skip }) {
     throw err;
   }
 
-  const category = query ? undefined : CATEGORIES[topic];
-  const queryKey = JSON.stringify({ category: category || null, query: query || null, language });
+  const mapping = query ? undefined : CATEGORIES[topic];
+  const category = typeof mapping === "string" ? mapping : undefined;
+  // A mapping that is an object contributes extra query parameters instead
+  // of a category -- `video: 1` for the Video News catalog.
+  const filters = mapping && typeof mapping === "object" ? mapping : {};
+  const queryKey = JSON.stringify({ category: category || null, filters, query: query || null, language });
 
   const loadPage = async (index) => {
     const cached = catalogCache.get(key(queryKey, index));
@@ -142,6 +149,7 @@ async function fetchPage({ apiKey, topic, query, language, skip }) {
         apikey: apiKey,
         language,
         category,
+        ...filters,
         q: query || undefined,
         page: cursor || undefined,
         // Collapses the syndicated near-copies that otherwise fill a page

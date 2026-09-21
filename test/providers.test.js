@@ -127,6 +127,30 @@ describe("newsdata provider", () => {
     expect(url.searchParams.has("category")).toBe(false);
   });
 
+  // "video" is a filter across all news rather than a category, so it maps
+  // to extra query parameters instead of a category string.
+  test("the Video News topic asks for video stories, with no category", async () => {
+    global.fetch = jest.fn().mockResolvedValue(page(0, 10, null));
+    await newsdata.fetchPage({ apiKey: "K", topic: "video", language: "en", skip: 0 });
+    const url = new URL(global.fetch.mock.calls[0][0]);
+    expect(url.searchParams.get("video")).toBe("1");
+    expect(url.searchParams.has("category")).toBe(false);
+  });
+
+  test("a category topic sends no video filter", async () => {
+    global.fetch = jest.fn().mockResolvedValue(page(0, 10, null));
+    await newsdata.fetchPage({ apiKey: "K", topic: "technology", language: "en", skip: 0 });
+    expect(new URL(global.fetch.mock.calls[0][0]).searchParams.has("video")).toBe(false);
+  });
+
+  test("the video catalog caches separately from a category catalog", async () => {
+    const f = jest.fn().mockResolvedValue(page(0, 10, null));
+    global.fetch = f;
+    await newsdata.fetchPage({ apiKey: "K", topic: "video", language: "en", skip: 0 });
+    await newsdata.fetchPage({ apiKey: "K", topic: "technology", language: "en", skip: 0 });
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
   test("walks the cursor chain, sending page 1's token for page 2", async () => {
     global.fetch = jest.fn().mockResolvedValueOnce(page(0, 10, "T1")).mockResolvedValueOnce(page(10, 10, null));
     await newsdata.fetchPage({ apiKey: "K", topic: "top", language: "en", skip: 0 });

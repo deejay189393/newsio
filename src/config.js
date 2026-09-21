@@ -1,4 +1,5 @@
-const { isValidTopicId, isValidProviderId, VALID_LANGUAGE_CODES, PROVIDERS } = require("./providers");
+const { isValidProviderId, VALID_LANGUAGE_CODES, PROVIDERS } = require("./providers");
+const { normalizeTopics, toStoredTopics } = require("./topics");
 
 /**
  * User configuration is carried in the URL as the first path segment,
@@ -14,13 +15,26 @@ const { isValidTopicId, isValidProviderId, VALID_LANGUAGE_CODES, PROVIDERS } = r
  * own personal addon URL.
  */
 function encodeConfig(config) {
-  return encodeURIComponent(JSON.stringify(normalizeConfig(config)));
+  const normalized = normalizeConfig(config);
+  return encodeURIComponent(
+    JSON.stringify({
+      sources: normalized.sources,
+      // Stored compactly: a preset is its id, a custom topic is { q }.
+      topics: toStoredTopics(normalized.topics),
+      language: normalized.language
+    })
+  );
 }
 
+/**
+ * The decoded, validated config the rest of the addon works with. `topics`
+ * comes back as ordered objects rather than bare ids, because a custom topic
+ * carries a query alongside its id -- and because the order is the setting.
+ */
 function normalizeConfig(config) {
   return {
     sources: normalizeSources(config && config.sources),
-    topics: Array.isArray(config && config.topics) ? config.topics.filter(isValidTopicId) : [],
+    topics: normalizeTopics(config && config.topics),
     language: validLanguage(config && config.language)
   };
 }
@@ -85,9 +99,7 @@ function maybeDecode(raw) {
  * addon would install and then do nothing.
  */
 function isConfigured(config) {
-  const sources = normalizeSources(config && config.sources);
-  const topics = Array.isArray(config && config.topics) ? config.topics.filter(isValidTopicId) : [];
-  return sources.length > 0 && topics.length > 0;
+  return normalizeSources(config && config.sources).length > 0 && normalizeTopics(config && config.topics).length > 0;
 }
 
 /** The providers a config does not already use, for the configure page. */

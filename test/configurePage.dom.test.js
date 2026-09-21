@@ -14,6 +14,8 @@
 const { JSDOM, VirtualConsole } = require("jsdom");
 const { renderConfigurePage } = require("../src/configurePage");
 const { decodeConfig } = require("../src/config");
+const { PRESET_TOPICS } = require("../src/topics");
+const presetLabel = (id) => PRESET_TOPICS.find((t) => t.id === id).label;
 
 const BASE = "https://newsio.up.railway.app";
 
@@ -60,13 +62,33 @@ function loadPage(options = {}) {
     cardOrder: () =>
       Array.from(document.querySelectorAll(".source")).map((el) => el.getAttribute("data-provider")),
     ranks: () => Array.from(document.querySelectorAll(".source-rank")).map((el) => el.textContent),
+    // Presets are added by clicking their chip in the "Add a preset" row.
     check: (...ids) => {
       ids.forEach((id) => {
-        document.querySelector(`input[name="topics"][value="${id}"]`).checked = true;
+        const label = presetLabel(id);
+        const chip = Array.from(document.querySelectorAll("#preset-chips button")).find(
+          (b) => b.textContent === `+ ${label}`
+        );
+        if (!chip) throw new Error(`no preset chip for ${id}`);
+        chip.dispatchEvent(new dom.window.Event("click", { bubbles: true }));
       });
     },
+    addCustom: (text) => {
+      document.getElementById("custom-topic").value = text;
+      document.getElementById("add-custom").dispatchEvent(new dom.window.Event("click", { bubbles: true }));
+    },
+    topicRows: () =>
+      Array.from(document.querySelectorAll(".topic-row")).map((r) => ({
+        id: r.getAttribute("data-topic-id"),
+        label: r.querySelector(".topic-label").textContent,
+        rank: r.querySelector(".topic-rank").textContent
+      })),
+    topicIds: () =>
+      Array.from(document.querySelectorAll(".topic-row")).map((r) => r.getAttribute("data-topic-id")),
+    rowButton: (id, cls) =>
+      document.querySelector(`.topic-row[data-topic-id="${id}"] .${cls}`),
     checkedTopics: () =>
-      Array.from(document.querySelectorAll('input[name="topics"]:checked')).map((el) => el.value)
+      Array.from(document.querySelectorAll(".topic-row")).map((r) => r.getAttribute("data-topic-id"))
   };
 }
 
@@ -127,7 +149,12 @@ describe("configure page — Generate install link", () => {
 
     expect(decodeConfig(segment)).toEqual({
       sources: [{ provider: "newsdata", apiKey: "pub_abc123" }],
-      topics: ["world", "technology"],
+      // The order topics were added in is the order they are stored in,
+      // because that is the order their catalogs appear in Stremio.
+      topics: [
+        { kind: "preset", id: "technology", label: "Technology" },
+        { kind: "preset", id: "world", label: "World" }
+      ],
       language: "en"
     });
   });
@@ -180,14 +207,14 @@ describe("configure page — validation", () => {
     expect(page.document.getElementById("result").className).not.toContain("show");
   });
 
-  test("refuses when no topic is selected and says so", () => {
+  test("refuses when no catalog is added and says so", () => {
     const page = loadPage();
     page.setKey("newsdata", "pub_abc123");
     page.submit();
 
     const error = page.document.getElementById("error");
     expect(error.style.display).toBe("block");
-    expect(error.textContent).toContain("at least one topic");
+    expect(error.textContent).toContain("at least one catalog");
     expect(page.document.getElementById("result").className).not.toContain("show");
   });
 
@@ -215,28 +242,6 @@ describe("configure page — validation", () => {
   });
 });
 
-describe("configure page — topic bulk actions", () => {
-  test("Select all checks every topic", () => {
-    const page = loadPage();
-    page.document.getElementById("select-all").dispatchEvent(
-      new page.dom.window.Event("click", { bubbles: true })
-    );
-    const all = page.document.querySelectorAll('input[name="topics"]');
-    expect(page.checkedTopics().length).toBe(all.length);
-    expect(all.length).toBeGreaterThan(0);
-  });
-
-  test("Clear all unchecks every topic", () => {
-    const page = loadPage({ existing: { sources: [{ provider: "currents", apiKey: "k" }], topics: ["top", "world"], language: "en" } });
-    expect(page.checkedTopics().length).toBe(2);
-
-    page.document.getElementById("clear-all").dispatchEvent(
-      new page.dom.window.Event("click", { bubbles: true })
-    );
-    expect(page.checkedTopics()).toEqual([]);
-  });
-});
-
 describe("configure page — re-configuration round trip", () => {
   test("pre-filled settings regenerate the same config when submitted unchanged", () => {
     const existing = {
@@ -256,7 +261,7 @@ describe("configure page — re-configuration round trip", () => {
 
     expect(decoded.sources).toEqual(existing.sources);
     expect(decoded.language).toBe(existing.language);
-    expect(decoded.topics.sort()).toEqual(["business", "technology"]);
+    expect(decoded.topics.map((t) => t.id)).toEqual(["technology", "business"]);
   });
 });
 
@@ -440,5 +445,188 @@ describe("configure page — the failover chain", () => {
     page.click(".source-note");
     page.click("#sources-list");
     expect(page.cardOrder()).toEqual(before);
+  });
+});
+
+describe("configure page — building the catalog list", () => {
+  test("starts empty and says so", () => {
+    const page = loadPage();
+    expect(page.topicRows()).toEqual([]);
+    expect(page.document.querySelector(".topic-empty").textContent).toContain("No catalogs yet");
+  });
+
+  test("a preset chip adds that topic to the end of the list", () => {
+    const page = loadPage();
+    page.check("technology");
+    page.check("sports");
+    expect(page.topicIds()).toEqual(["technology", "sports"]);
+  });
+
+  test("an added preset stops being offered as a chip", () => {
+    const page = loadPage();
+    const before = page.document.querySelectorAll("#preset-chips button").length;
+    page.check("technology");
+    expect(page.document.querySelectorAll("#preset-chips button").length).toBe(before - 1);
+  });
+
+  test("removing a topic puts its chip back", () => {
+    const page = loadPage();
+    page.check("technology");
+    page.rowButton("technology", "remove").dispatchEvent(new page.dom.window.Event("click", { bubbles: true }));
+    expect(page.topicIds()).toEqual([]);
+    expect(
+      Array.from(page.document.querySelectorAll("#preset-chips button")).some((b) => b.textContent === "+ Technology")
+    ).toBe(true);
+  });
+
+  test("ranks renumber as the list changes", () => {
+    const page = loadPage();
+    page.check("technology", "sports", "health");
+    expect(page.topicRows().map((r) => r.rank)).toEqual(["1", "2", "3"]);
+    page.rowButton("sports", "remove").dispatchEvent(new page.dom.window.Event("click", { bubbles: true }));
+    expect(page.topicRows().map((r) => r.rank)).toEqual(["1", "2"]);
+  });
+});
+
+describe("configure page — custom topics", () => {
+  const url = (page) => page.document.getElementById("manifest-url").value;
+  const segOf = (page) => url(page).slice(BASE.length + 1, -"/manifest.json".length);
+
+  test("typing a topic and pressing Add creates a catalog for it", () => {
+    const page = loadPage();
+    page.addCustom("London crime");
+    expect(page.topicRows()).toEqual([{ id: "q_london-crime", label: "London crimecustom", rank: "1" }]);
+  });
+
+  test("a custom topic is marked as custom", () => {
+    const page = loadPage();
+    page.addCustom("London crime");
+    expect(page.document.querySelector(".topic-row .chip").textContent).toBe("custom");
+  });
+
+  test("it reaches the config as a query the server can decode", () => {
+    const page = loadPage();
+    page.setKey("newsdata", "k");
+    page.addCustom("London crime");
+    page.submit();
+    expect(decodeConfig(segOf(page)).topics).toEqual([
+      { kind: "custom", id: "q_london-crime", label: "London crime", query: "London crime" }
+    ]);
+  });
+
+  // Regression: the whitespace collapse was written as a regex inside the
+  // page's template literal, which ate the escape and split on the letter
+  // "s" instead of on spaces.
+  test("collapses runs of whitespace rather than splitting on a letter", () => {
+    const page = loadPage();
+    page.setKey("newsdata", "k");
+    page.addCustom("  sports   scores  ");
+    page.submit();
+    expect(decodeConfig(segOf(page)).topics[0].query).toBe("sports scores");
+  });
+
+  test("the input clears after adding, ready for the next one", () => {
+    const page = loadPage();
+    page.addCustom("London crime");
+    expect(page.document.getElementById("custom-topic").value).toBe("");
+  });
+
+  test("Enter in the custom field adds the topic instead of submitting", () => {
+    const page = loadPage();
+    const input = page.document.getElementById("custom-topic");
+    input.value = "Arsenal";
+    const ev = new page.dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    input.dispatchEvent(ev);
+    expect(page.topicIds()).toEqual(["q_arsenal"]);
+    expect(ev.defaultPrevented).toBe(true);
+  });
+
+  test.each([["   "], [""], ["!!!"], ["--- ---"]])("refuses %p as a topic", (text) => {
+    const page = loadPage();
+    page.addCustom(text);
+    expect(page.topicIds()).toEqual([]);
+  });
+
+  test("refuses a duplicate, however it is spelled", () => {
+    const page = loadPage();
+    page.addCustom("London crime");
+    page.addCustom("  London   Crime  ");
+    expect(page.topicIds()).toEqual(["q_london-crime"]);
+    expect(page.document.getElementById("error").textContent).toContain("already have a catalog");
+  });
+
+  test("caps how many custom topics can be added", () => {
+    const page = loadPage();
+    for (let i = 0; i < 20; i++) page.addCustom(`topic number ${i}`);
+    expect(page.topicIds().length).toBe(12);
+    expect(page.document.getElementById("error").textContent).toContain("at most 12");
+  });
+
+  test("a topic the user typed is never interpreted as markup", () => {
+    const page = loadPage();
+    page.addCustom('<img src=x onerror="window.PWNED=1">');
+    expect(page.dom.window.PWNED).toBeUndefined();
+    expect(page.document.querySelectorAll("#topic-list img")).toHaveLength(0);
+    expect(page.document.querySelector(".topic-label").textContent).toContain("<img");
+  });
+});
+
+describe("configure page — catalog order", () => {
+  const segOf = (page) =>
+    page.document.getElementById("manifest-url").value.slice(BASE.length + 1, -"/manifest.json".length);
+
+  test("moving a topic up changes the order that is generated", () => {
+    const page = loadPage();
+    page.setKey("newsdata", "k");
+    page.check("technology", "sports");
+    page.rowButton("sports", "move-up").dispatchEvent(new page.dom.window.Event("click", { bubbles: true }));
+    expect(page.topicIds()).toEqual(["sports", "technology"]);
+    page.submit();
+    expect(decodeConfig(segOf(page)).topics.map((t) => t.id)).toEqual(["sports", "technology"]);
+  });
+
+  test("moving a topic down works too", () => {
+    const page = loadPage();
+    page.check("technology", "sports");
+    page.rowButton("technology", "move-down").dispatchEvent(new page.dom.window.Event("click", { bubbles: true }));
+    expect(page.topicIds()).toEqual(["sports", "technology"]);
+  });
+
+  test("a custom topic can be placed between presets", () => {
+    const page = loadPage();
+    page.setKey("newsdata", "k");
+    page.check("technology");
+    page.addCustom("London crime");
+    page.check("sports");
+    expect(page.topicIds()).toEqual(["technology", "q_london-crime", "sports"]);
+    page.submit();
+    expect(decodeConfig(segOf(page)).topics.map((t) => t.id)).toEqual([
+      "technology",
+      "q_london-crime",
+      "sports"
+    ]);
+  });
+
+  test("the first row cannot move up, nor the last down", () => {
+    const page = loadPage();
+    page.check("technology", "sports");
+    expect(page.rowButton("technology", "move-up").disabled).toBe(true);
+    expect(page.rowButton("sports", "move-down").disabled).toBe(true);
+  });
+
+  test("re-configuration shows the saved order back and regenerates it unchanged", () => {
+    const existing = {
+      sources: [{ provider: "newsdata", apiKey: "k" }],
+      topics: ["sports", { q: "London crime" }, "technology"],
+      language: "en"
+    };
+    const page = loadPage({ existing });
+    expect(page.topicIds()).toEqual(["sports", "q_london-crime", "technology"]);
+    page.submit();
+    expect(decodeConfig(segOf(page)).topics.map((t) => t.id)).toEqual([
+      "sports",
+      "q_london-crime",
+      "technology"
+    ]);
   });
 });

@@ -51,6 +51,15 @@ every fresher source is already spent.
   whole addon, so a query returns one result row -- labelled **Newsio** -- that
   queries newsdata.io live across every category, rather than filtering a local
   list. The topic catalogs are browse-only.
+- **Custom topics.** Anything you type becomes a catalog of its own — a saved
+  search presented like any other shelf. "London crime", "Arsenal",
+  "semiconductor exports". Up to 12 of them.
+- **You choose the catalog order.** Topics are an ordered list, and that order
+  is the order the catalogs appear in Stremio. A custom topic can sit anywhere
+  among the presets.
+- **A Video News catalog.** Only newsdata.io carries video, and only a small
+  share of its stories have one, so browsing a normal topic surfaces them
+  rarely. This catalog asks newsdata.io for video stories specifically.
 - **Failover across sources.** Configure two or three keys and order them.
   Newsio tries them top to bottom and moves on whenever one is rate-limited,
   rejected or down — and remembers the failure for ten minutes so the next
@@ -151,6 +160,42 @@ into the same quota.
 
 The deployment holds no database and no secrets. The flip side: **your install
 URL contains every API key you entered, so don't share it publicly.**
+
+## Topics and catalog order
+
+`topics` is an **ordered list**, and the order is the setting: it is the order
+the catalogs appear in Stremio. It holds two kinds of entry.
+
+```js
+topics: ["top", { q: "London crime" }, "technology"]
+//        preset   custom                preset
+```
+
+A **preset** is one of the curated subjects each provider maps to its own
+category vocabulary. A **custom topic** is free text, run as a standing search
+and presented as a catalog of its own — "London crime" is not a category any
+news API has, but it is a perfectly good saved query.
+
+A custom topic's catalog id is derived from its text (`London crime` →
+`q_london-crime`) rather than generated, so re-saving an unchanged config does
+not orphan catalogs Stremio has already installed. The `q_` prefix is also what
+keeps a custom topic from ever colliding with a preset id.
+
+The id must appear in *your* config for the catalog to serve anything — another
+install's catalog id means nothing here, so the addon cannot be used as an open
+search proxy.
+
+### Video News
+
+Only newsdata.io reports video at all, and only a small share of its stories
+carry one, so scrolling an ordinary topic turns up very few. The **Video News**
+preset asks newsdata.io for video stories specifically (`video=1`) rather than
+filtering a normal feed, so the catalog is video from end to end. The other two
+sources are skipped for it — they have no video field to filter on.
+
+The ▶ marker still only appears where playback will really work: a story whose
+`video_url` is an embed page rather than a media file is left unmarked, because
+Stremio can only hand that to a browser.
 
 ## Failover
 
@@ -340,7 +385,7 @@ npm start           # http://localhost:3000/configure
 ```
 
 ```bash
-npm test            # 607 tests
+npm test            # 701 tests
 npm run test:coverage
 ```
 

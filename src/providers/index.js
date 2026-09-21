@@ -11,39 +11,14 @@ const PROVIDERS = [currents, newsdata, gnews];
 const PROVIDERS_BY_ID = new Map(PROVIDERS.map((p) => [p.id, p]));
 
 /**
- * Canonical topics.
- *
- * Each provider has its own category vocabulary, so catalogs are defined in
- * these ids and each provider maps them to whatever it calls the same thing
- * (`tourism` is "tourism" to newsdata.io and "travel" to Currents). That
- * keeps a catalog's identity stable no matter which source ends up serving
- * it -- which matters, because Stremio caches the manifest and a user's
- * installed catalogs must not shift when a source fails over.
- *
- * A provider that has no equivalent for a topic maps it to null and is
- * skipped for that catalog rather than asked something it cannot answer.
+ * Canonical topics live in ../topics; each provider maps them to its own
+ * vocabulary. A mapping is either a category string, an object of extra
+ * query parameters (for a topic that is a filter rather than a subject,
+ * like "video"), or null when that provider cannot serve the topic at all
+ * and should be skipped for it.
  */
-const TOPICS = [
-  { id: "top", label: "Top Stories" },
-  { id: "world", label: "World" },
-  { id: "business", label: "Finance & Business" },
-  { id: "technology", label: "Technology" },
-  { id: "science", label: "Science" },
-  { id: "health", label: "Health" },
-  { id: "sports", label: "Sports" },
-  { id: "entertainment", label: "Entertainment" },
-  { id: "politics", label: "Politics" },
-  { id: "environment", label: "Environment" },
-  { id: "food", label: "Food" },
-  { id: "lifestyle", label: "Lifestyle" },
-  { id: "education", label: "Education" },
-  { id: "tourism", label: "Tourism & Travel" },
-  { id: "crime", label: "Crime" },
-  { id: "domestic", label: "Domestic" },
-  { id: "other", label: "Other" }
-];
-
-const TOPICS_BY_ID = new Map(TOPICS.map((t) => [t.id, t]));
+const { PRESET_TOPICS, getPresetTopic, getTopicLabel, isPresetTopicId } = require("../topics");
+const TOPICS = PRESET_TOPICS;
 
 const LANGUAGES = [
   { code: "en", label: "English" },
@@ -71,19 +46,6 @@ function isValidProviderId(id) {
   return PROVIDERS_BY_ID.has(id);
 }
 
-function getTopicById(id) {
-  return TOPICS_BY_ID.get(id);
-}
-
-function isValidTopicId(id) {
-  return TOPICS_BY_ID.has(id);
-}
-
-function getTopicLabel(id) {
-  const topic = TOPICS_BY_ID.get(id);
-  return topic ? topic.label : null;
-}
-
 /** Can this provider serve this canonical topic at all? */
 function providerSupportsTopic(provider, topicId) {
   return Boolean(provider && provider.categories[topicId]);
@@ -102,9 +64,9 @@ module.exports = {
   providerSupportsTopic,
   providerForArticleId,
   TOPICS,
-  getTopicById,
+  getTopicById: getPresetTopic,
   getTopicLabel,
-  isValidTopicId,
+  isValidTopicId: isPresetTopicId,
   LANGUAGES,
   VALID_LANGUAGE_CODES
 };

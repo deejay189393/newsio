@@ -1,6 +1,7 @@
 const { addonBuilder, getRouter } = require("stremio-addon-sdk");
 const { buildInterfaceManifest, SEARCH_CATALOG_ID } = require("./manifest");
-const { isValidTopicId, VALID_LANGUAGE_CODES } = require("./providers");
+const { VALID_LANGUAGE_CODES } = require("./providers");
+const { normalizeTopics, isPresetTopicId } = require("./topics");
 const { fetchCatalogPage, getArticle } = require("./sources");
 const { normalizeSources } = require("./config");
 const { toMetaPreview, toFullMeta, toStreams } = require("./stremioMeta");
@@ -36,14 +37,22 @@ function createAddonInterface() {
     const sources = safeSources(config);
     if (!sources.length) return { metas: [] };
 
-    // Two shapes of catalog reach this handler. The dedicated search catalog
-    // runs a free-text query across everything. A topic catalog browses only
-    // its own category and no longer advertises `search` at all, so a query
-    // aimed at one is ignored rather than silently widened.
+    // Three shapes of catalog reach this handler:
+    //
+    //   the search catalog   free text from the user, across everything
+    //   a preset topic       browses that subject's category
+    //   a custom topic       a standing query the user saved, run as a
+    //                        search but presented as its own catalog
+    //
+    // A preset topic no longer advertises `search` at all, so a query aimed
+    // at one is ignored rather than silently widening the request.
     const isSearch = id === SEARCH_CATALOG_ID;
-    if (!isSearch && !isValidTopicId(id)) return { metas: [] };
+    const custom = isSearch
+      ? undefined
+      : normalizeTopics(config.topics).find((t) => t.kind === "custom" && t.id === id);
+    if (!isSearch && !custom && !isPresetTopicId(id)) return { metas: [] };
 
-    const searchQuery = isSearch ? (extra && extra.search) || undefined : undefined;
+    const searchQuery = isSearch ? (extra && extra.search) || undefined : custom ? custom.query : undefined;
     // The manifest marks that extra isRequired, but a hand-built URL can
     // still reach the search catalog with no query, and there is nothing to
     // list for one.
@@ -52,7 +61,8 @@ function createAddonInterface() {
     const skip = parseInt((extra && extra.skip) || "0", 10) || 0;
 
     const { articles } = await fetchCatalogPage(sources, {
-      topic: isSearch ? undefined : id,
+      // A custom topic is served as a search, so it carries no topic id.
+      topic: isSearch || custom ? undefined : id,
       query: searchQuery,
       language: safeLanguage(config && config.language),
       skip

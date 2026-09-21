@@ -62,7 +62,7 @@ describe("manifest routes", () => {
     const res = await request(app).get("/manifest.json");
     expect(res.status).toBe(200);
     expect(res.body.id).toBe("org.deejay189393.newsio");
-    expect(res.body.version).toBe("0.5.1");
+    expect(res.body.version).toBe("0.6.0");
     expect(res.body.catalogs).toEqual([]);
     expect(res.body.behaviorHints.configurationRequired).toBe(true);
     expect(res.body.types).toEqual(["news"]);
@@ -108,7 +108,7 @@ describe("manifest routes", () => {
     const seg = encodeURIComponent(JSON.stringify({ topics: ["technology"], language: "en" }));
     const res = await request(app).get(`/${seg}/configure`);
     expect(res.status).toBe(200);
-    expect(res.text).toContain('value="technology" checked');
+    expect(res.text).toContain('"id":"technology"');
   });
 
   test("the plain /manifest.json carries the stremio-addons.net credential", async () => {
@@ -171,7 +171,7 @@ describe("configure / re-configure routes", () => {
     const res = await request(app).get(`/${CFG()}/configure`);
     expect(res.status).toBe(200);
     expect(res.text).toContain("TEST_KEY");
-    expect(res.text).toContain('value="technology" checked');
+    expect(res.text).toContain('"id":"technology"');
     expect(res.text).toContain("Editing your current setup");
   });
 
