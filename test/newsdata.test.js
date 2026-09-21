@@ -5,6 +5,7 @@ const {
   normalizeArticle,
   makeArticleId,
   realText,
+  decodeEntities,
   isLowQuality,
   LOW_QUALITY_SOURCE_PRIORITY,
   UPSTREAM_PAGE_SIZE,
@@ -428,6 +429,66 @@ describe("fetchNews — query shape", () => {
 
   test("requires an API key", async () => {
     await expect(fetchNews({ category: "top" })).rejects.toMatchObject({ status: 401 });
+  });
+});
+
+describe("HTML entities from publishers", () => {
+  // Publishers hand newsdata.io escaped text and it is passed through
+  // verbatim: a real tag row rendered "Telco &amp; Isp".
+  test.each([
+    ["telco &amp; isp", "telco & isp"],
+    ["AT&amp;T earnings", "AT&T earnings"],
+    ["it&#39;s here", "it's here"],
+    ["&quot;quoted&quot;", '"quoted"'],
+    ["caf&#233;", "café"],
+    ["&lt;tag&gt;", "<tag>"],
+    ["&#x2014; dash", "— dash"],
+    ["a&nbsp;b", "a b"]
+  ])("decodes %p to %p", (raw, decoded) => {
+    expect(decodeEntities(raw)).toBe(decoded);
+  });
+
+  test.each([
+    "&notanentity; kept",
+    "100% & rising",
+    "plain text",
+    "bare & ampersand",
+    "&; empty",
+    "&#; empty numeric"
+  ])("leaves %p alone", (text) => {
+    expect(decodeEntities(text)).toBe(text);
+  });
+
+  test.each([
+    ["&#0;", "a zero code point"],
+    ["&#1114112;", "past the end of Unicode"],
+    ["&#xD800;", "a lone surrogate"],
+    ["&#xFFFFFFF;", "an absurd code point"]
+  ])("refuses %p (%s) rather than throwing", (raw) => {
+    expect(() => decodeEntities(raw)).not.toThrow();
+    expect(decodeEntities(raw)).toBe(raw);
+  });
+
+  test("decodes the title, description and keywords of an article", () => {
+    const n = normalizeArticle({
+      article_id: "x",
+      title: "AT&amp;T earnings",
+      description: "Profit rose &amp; margins held",
+      keywords: ["telco &amp; isp", "ai"],
+      source_name: "Smith &amp; Co"
+    });
+    expect(n.title).toBe("AT&T earnings");
+    expect(n.description).toBe("Profit rose & margins held");
+    expect(n.keywords).toEqual(["telco & isp", "ai"]);
+    expect(n.sourceName).toBe("Smith & Co");
+  });
+
+  test("a non-string keyword survives the decode pass without throwing", () => {
+    expect(normalizeArticle({ article_id: "x", keywords: ["ok", 5, null] }).keywords).toEqual(["ok"]);
+  });
+
+  test("decoding happens once, so escaped entities are not unwrapped twice", () => {
+    expect(decodeEntities("&amp;amp;")).toBe("&amp;");
   });
 });
 
