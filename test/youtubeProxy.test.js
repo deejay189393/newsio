@@ -348,3 +348,48 @@ describe("the muxed fallback", () => {
     expect(res.status).toBe(415);
   });
 });
+
+describe("when a video has no adaptive ladder", () => {
+  // An empty manifest is a document the player accepts and then cannot
+  // play, while a perfectly good muxed file sits unused.
+  const NO_LADDER = {
+    ...PLAYER_OK,
+    streamingData: { ...PLAYER_OK.streamingData, adaptiveFormats: [] }
+  };
+
+  function mockResolve(player) {
+    return jest
+      .spyOn(global, "fetch")
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => WATCH_HTML })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => player });
+  }
+
+  test("the manifest route points at the muxed file instead of serving an empty manifest", async () => {
+    mockResolve(NO_LADDER);
+    const res = await request(app).get("/yt/dQw4w9WgXcQ/manifest.mpd");
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toMatch(/\/yt\/dQw4w9WgXcQ\.mp4$/);
+    expect(res.text).not.toContain("<MPD");
+  });
+
+  test("the redirect keeps the host it was asked on", async () => {
+    mockResolve(NO_LADDER);
+    const res = await request(app).get("/yt/dQw4w9WgXcQ/manifest.mpd").set("Host", "newsio-beta.up.railway.app");
+    expect(res.headers.location).toContain("newsio-beta.up.railway.app");
+  });
+
+  test("a video with neither is refused before any redirect is considered", async () => {
+    // resolveVideo rejects it, so the manifest route never has to decide.
+    mockResolve({ ...PLAYER_OK, streamingData: { formats: [], adaptiveFormats: [] } });
+    const res = await request(app).get("/yt/dQw4w9WgXcQ/manifest.mpd");
+    expect(res.status).toBe(415);
+    expect(res.headers.location).toBeUndefined();
+  });
+
+  test("a normal video still gets a real manifest", async () => {
+    mockResolve(PLAYER_OK);
+    const res = await request(app).get("/yt/dQw4w9WgXcQ/manifest.mpd");
+    expect(res.status).toBe(200);
+    expect(res.text).toContain('height="1080"');
+  });
+});
