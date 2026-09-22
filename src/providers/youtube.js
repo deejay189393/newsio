@@ -13,6 +13,23 @@ const ID_PREFIX = "yt_";
 const UPSTREAM_PAGE_SIZE = 50;
 
 /**
+ * How long a fetched page is reused before YouTube is asked again.
+ *
+ * The shared default is ten minutes, which suits an API measured in
+ * thousands of calls a day. This one is measured in a hundred: every
+ * catalog on the home screen costs one search each time its page expires,
+ * so seven topics at ten minutes is forty-two searches an hour and the
+ * whole day's allowance inside three hours of ordinary use -- which is
+ * exactly how it ran out.
+ *
+ * An hour instead. Results here are ordered by upload date over a query
+ * that is usually a standing interest rather than a breaking story, so
+ * they barely move within the hour, and it brings seven topics down to
+ * well inside the daily limit even when browsed all day.
+ */
+const PAGE_CACHE_TTL_MS = 60 * 60 * 1000;
+
+/**
  * A cold jump deep into a catalog has to walk the token chain from page 0,
  * and every step is one of those 100 daily searches. Four is the ceiling,
  * matching the deepest `skip` the manifest offers (180) at this page size.
@@ -317,7 +334,7 @@ async function fetchPage({ apiKey, topic, query, language, skip }) {
       token = data.nextPageToken || null;
       page = { articles, hasMore: Boolean(token), nextPageToken: token };
       pageCursorCache.set(key(queryKey, i), token);
-      catalogCache.set(key(queryKey, i), page);
+      catalogCache.set(key(queryKey, i), page, PAGE_CACHE_TTL_MS);
       if (!token && i < index) return { articles: [], hasMore: false };
     }
     return page;
@@ -364,6 +381,7 @@ module.exports = {
   statusFor,
   UPSTREAM_PAGE_SIZE,
   MAX_PAGE_WALK,
+  PAGE_CACHE_TTL_MS,
   MIN_VIEW_COUNT,
   NEWS_CATEGORY,
   REGIONS,

@@ -396,6 +396,29 @@ describe("paging through a catalog", () => {
     expect(paramsOf(spy, 2).pageToken).toBe("TOKEN2");
   });
 
+  test("a fetched page is held for an hour, because the daily allowance is 100", async () => {
+    // The shared ten-minute default suits an API measured in thousands of
+    // calls a day. Seven topics at ten minutes is 42 searches an hour and
+    // the whole allowance inside three hours -- which is how it ran out.
+    expect(youtube.PAGE_CACHE_TTL_MS).toBe(60 * 60 * 1000);
+
+    const spy = mockFetch(mockPage(["aaaaaaaaaaa"]));
+    const args = { apiKey: "k", topic: "world", language: "en", skip: 0 };
+    await youtube.fetchPage(args);
+    expect(spy).toHaveBeenCalledTimes(2); // one search, one enrichment
+
+    // Half an hour later -- past the shared default -- still no new search.
+    const realNow = Date.now;
+    Date.now = () => realNow() + 30 * 60 * 1000;
+    try {
+      const again = await youtube.fetchPage(args);
+      expect(again.articles).toHaveLength(1);
+      expect(spy).toHaveBeenCalledTimes(2);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
   test("a page already fetched is served from cache, spending no quota", async () => {
     const spy = mockFetch(mockPage(["aaaaaaaaaaa"], { nextPageToken: "T2" }));
     await youtube.fetchPage({ apiKey: "k", topic: "world", language: "en", skip: 0 });
