@@ -49,6 +49,9 @@ const NEWS_CATEGORY = "25";
  */
 const MIN_VIEW_COUNT = 500;
 
+/** ISO 639-2 for "no linguistic content": silent footage, music beds. */
+const NO_SPOKEN_LANGUAGE = "zxx";
+
 /**
  * Canonical topic id -> the terms searched for it.
  *
@@ -194,7 +197,16 @@ function exclusionReason(article, wantedLanguage) {
   if (article.liveBroadcast === "upcoming") return "not broadcast yet";
   // An unset language is left alone: absent is not wrong, and the major
   // outlets that omit it would otherwise be thrown away with the junk.
-  if (article.language && wantedLanguage && article.language !== wantedLanguage) {
+  // "zxx" is the same case spelled differently -- it is the ISO code for
+  // "no linguistic content", so it is not a language that can fail to
+  // match. Measured on an "Indian Cricket" page: three of fifty were
+  // silent footage being discarded for speaking the wrong language.
+  if (
+    article.language &&
+    article.language !== NO_SPOKEN_LANGUAGE &&
+    wantedLanguage &&
+    article.language !== wantedLanguage
+  ) {
     return `${article.language} audio`;
   }
   if (article.viewCount !== null && article.viewCount < MIN_VIEW_COUNT) return "too few views";
@@ -383,6 +395,7 @@ module.exports = {
   MAX_PAGE_WALK,
   PAGE_CACHE_TTL_MS,
   MIN_VIEW_COUNT,
+  NO_SPOKEN_LANGUAGE,
   NEWS_CATEGORY,
   REGIONS,
   CATALOG_PAGE_SIZE

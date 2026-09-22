@@ -335,6 +335,21 @@ describe("which videos are kept", () => {
     expect(youtube.exclusionReason(article({ language: "" }), "en")).toBeNull();
   });
 
+  test("silent footage is kept: \"zxx\" is no language, not the wrong one", () => {
+    // Measured on a live "Indian Cricket" page: three of fifty results were
+    // being discarded for speaking the wrong language while having no
+    // spoken language at all.
+    expect(youtube.NO_SPOKEN_LANGUAGE).toBe("zxx");
+    expect(youtube.exclusionReason(article({ language: "zxx" }), "en")).toBeNull();
+    expect(youtube.exclusionReason(article({ language: "zxx" }), "hi")).toBeNull();
+  });
+
+  test("a real language mismatch is still dropped", () => {
+    // The zxx exemption must not become a hole that lets everything past.
+    expect(youtube.exclusionReason(article({ language: "hi" }), "en")).toBe("hi audio");
+    expect(youtube.exclusionReason(article({ language: "ta" }), "en")).toBe("ta audio");
+  });
+
   test("everything passes when no language was asked for", () => {
     expect(youtube.exclusionReason(article({ language: "hi" }), "")).toBeNull();
   });
