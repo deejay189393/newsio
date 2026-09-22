@@ -355,7 +355,13 @@ async function resolveVideo(videoId, { fetchImpl = fetch } = {}) {
   const details = player.videoDetails || {};
   const byItag = new Map();
   [...adaptive.video, ...(adaptive.audio ? [adaptive.audio] : []), ...(progressive ? [progressive] : [])].forEach(
-    (f) => byItag.set(String(f.itag), { url: f.url, mimeType: f.mimeType.split(";")[0] })
+    (f) =>
+      byItag.set(String(f.itag), {
+        url: f.url,
+        mimeType: f.mimeType.split(";")[0],
+        // Needed to rewrite a suffix range, which googlevideo refuses.
+        contentLength: Number(f.contentLength) || null
+      })
   );
 
   const resolved = {

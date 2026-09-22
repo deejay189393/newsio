@@ -393,3 +393,66 @@ describe("when a video has no adaptive ladder", () => {
     expect(res.text).toContain('height="1080"');
   });
 });
+
+describe("seeking: the range the player sends reaches YouTube in a form it accepts", () => {
+  test("a suffix range on the muxed file is rewritten before it is forwarded", async () => {
+    // Measured live: googlevideo answers bytes=-2000 with 416, and a player
+    // that cannot read the end of the file cannot build a seek index.
+    const spy = mockPlayback(
+      mediaResponse({
+        status: 206,
+        headers: { "content-type": "video/mp4", "content-range": "bytes 44-47/2048", "content-length": "4" }
+      })
+    );
+    const res = await request(app).get("/yt/dQw4w9WgXcQ.mp4").set("Range", "bytes=-2000");
+
+    // contentLength of the muxed fixture is 2048, so the last 2000 bytes
+    // start at 48 and end at 2047.
+    expect(spy.mock.calls[2][1].headers.Range).toBe("bytes=48-2047");
+    expect(res.status).toBe(206);
+  });
+
+  test("a suffix range on an adaptive format is rewritten against that format's own length", async () => {
+    const spy = mockPlayback(
+      mediaResponse({ status: 206, headers: { "content-type": "video/mp4", "content-length": "4" } })
+    );
+    await request(app).get("/yt/dQw4w9WgXcQ/137").set("Range", "bytes=-1000");
+    // itag 137's fixture length is 155676321, not the muxed file's 2048.
+    expect(spy.mock.calls[2][1].headers.Range).toBe("bytes=155675321-155676320");
+  });
+
+  test("an absolute range is forwarded byte for byte", async () => {
+    const spy = mockPlayback(
+      mediaResponse({ status: 206, headers: { "content-type": "video/mp4", "content-length": "4" } })
+    );
+    await request(app).get("/yt/dQw4w9WgXcQ/137").set("Range", "bytes=1000-2000");
+    expect(spy.mock.calls[2][1].headers.Range).toBe("bytes=1000-2000");
+  });
+
+  test("an open-ended range is forwarded unchanged, since upstream handles it", async () => {
+    const spy = mockPlayback(
+      mediaResponse({ status: 206, headers: { "content-type": "video/mp4", "content-length": "4" } })
+    );
+    await request(app).get("/yt/dQw4w9WgXcQ/137").set("Range", "bytes=5000000-");
+    expect(spy.mock.calls[2][1].headers.Range).toBe("bytes=5000000-");
+  });
+
+  test("with no Range at all, none is invented", async () => {
+    const spy = mockPlayback(mediaResponse({ headers: { "content-type": "video/mp4", "content-length": "4" } }));
+    await request(app).get("/yt/dQw4w9WgXcQ/137");
+    expect(spy.mock.calls[2][1].headers.Range).toBeUndefined();
+  });
+
+  test("every response advertises range support, which is what invites seeking", async () => {
+    mockPlayback(mediaResponse({ headers: { "content-type": "video/mp4", "content-length": "4" } }));
+    const res = await request(app).get("/yt/dQw4w9WgXcQ/137");
+    expect(res.headers["accept-ranges"]).toBe("bytes");
+  });
+
+  test("a HEAD reports the full length, which is how a player sizes the seek bar", async () => {
+    mockPlayback(mediaResponse({ headers: { "content-length": "155676321" } }));
+    const res = await request(app).head("/yt/dQw4w9WgXcQ/137");
+    expect(res.headers["content-length"]).toBe("155676321");
+    expect(res.headers["accept-ranges"]).toBe("bytes");
+  });
+});
