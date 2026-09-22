@@ -5,6 +5,7 @@ const { decodeConfig } = require("./src/config");
 const { withBaseUrl } = require("./src/requestContext");
 const { resolveVideo, buildDashManifest, ANDROID_CLIENT, VIDEO_ID_RE } = require("./src/youtubeStream");
 const { recordSuccess, recordFailure } = require("./src/youtubeHealth");
+const { normalizeRange } = require("./src/byteRange");
 const { buildManifest, getUnconfiguredManifest } = require("./src/manifest");
 const { renderConfigurePage } = require("./src/configurePage");
 const { createResourceRouter } = require("./src/addonInterface");
@@ -58,9 +59,12 @@ function resolveFailed(res, videoId, err) {
 }
 
 /** Pipe an upstream media response through, Range headers intact. */
-async function pipeMedia(req, res, mediaUrl, fallbackType) {
+async function pipeMedia(req, res, mediaUrl, fallbackType, contentLength) {
   const headers = { "User-Agent": ANDROID_CLIENT.userAgent };
-  if (req.headers.range) headers.Range = req.headers.range;
+  // Suffix ranges ("the last N bytes") are answered with 416 upstream, and
+  // they are how a player reads an MP4's trailing moov atom to build a seek
+  // index. Rewritten here into the absolute form googlevideo accepts.
+  if (req.headers.range) headers.Range = normalizeRange(req.headers.range, contentLength);
 
   let upstream;
   try {
@@ -135,7 +139,7 @@ async function playFormat(req, res) {
 
   const format = video.byItag.get(String(itag));
   if (!format) return res.status(404).json({ error: "No such format for this video." });
-  return pipeMedia(req, res, format.url, format.mimeType);
+  return pipeMedia(req, res, format.url, format.mimeType, format.contentLength);
 }
 
 /** The muxed 360p file, kept for players that cannot read a manifest. */
@@ -152,7 +156,7 @@ async function playProgressive(req, res) {
   }
 
   if (!video.progressive) return res.status(415).json({ error: "No single-file format for this video." });
-  return pipeMedia(req, res, video.progressive.url, video.progressive.mimeType);
+  return pipeMedia(req, res, video.progressive.url, video.progressive.mimeType, video.progressive.contentLength);
 }
 
 app.get("/yt/:videoId/manifest.mpd", playManifest);
