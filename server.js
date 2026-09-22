@@ -101,6 +101,13 @@ async function playManifest(req, res) {
     return resolveFailed(res, videoId, err);
   }
 
+  // No adaptive ladder means nothing to put in a manifest, and an empty
+  // one is a document the player accepts and then cannot play. The muxed
+  // file is right there, so point at it: 360p beats a silent failure.
+  // resolveVideo refuses a video with neither, so reaching here without a
+  // ladder guarantees the muxed file exists.
+  if (!video.adaptive.video.length) return res.redirect(302, `${getBaseUrl(req)}/yt/${videoId}.mp4`);
+
   const manifest = buildDashManifest({
     video: video.adaptive.video,
     audio: video.adaptive.audio,

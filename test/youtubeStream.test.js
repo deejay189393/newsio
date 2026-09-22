@@ -82,7 +82,9 @@ describe("the watch config", () => {
   test("is scraped from a watch page and reused", async () => {
     const f = mockFetch(html(WATCH_HTML));
     const first = await yt.getWatchConfig(f);
-    expect(first).toEqual({ apiKey: "AIzaTESTKEY", visitorData: "CgtWSVNJVE9S" });
+    expect(first).toMatchObject({ apiKey: "AIzaTESTKEY", visitorData: "CgtWSVNJVE9S" });
+    // Stamped, so a later refusal can tell a fresh config from a stale one.
+    expect(typeof first.fetchedAt).toBe("number");
 
     // Cached: a second caller must not refetch a whole HTML page.
     const second = await yt.getWatchConfig(f);
@@ -92,7 +94,7 @@ describe("the watch config", () => {
 
   test("a page missing the markers yields nulls rather than throwing", async () => {
     const f = mockFetch(html("<html>nothing useful</html>"));
-    expect(await yt.getWatchConfig(f)).toEqual({ apiKey: null, visitorData: null });
+    expect(await yt.getWatchConfig(f)).toMatchObject({ apiKey: null, visitorData: null });
   });
 
   test("an unreachable YouTube is a 502", async () => {
@@ -284,12 +286,48 @@ describe("resolving a video", () => {
     await expect(yt.resolveVideo("dQw4w9WgXcQ", { fetchImpl: f })).rejects.toMatchObject({ status: 403 });
   });
 
-  test("LOGIN_REQUIRED throws away the cached config, so the retry gets a fresh visitor id", async () => {
-    // Measured live: reusing a spent visitor id keeps returning
-    // LOGIN_REQUIRED, and re-scraping clears it.
+  test("a refusal keeps a freshly scraped config, rather than refetching the page it just got", async () => {
+    // The failure path used to drop the config every time, so a sustained
+    // block became one full watch-page fetch per press of play against the
+    // endpoint already answering 429.
     const f = mockFetch(html(WATCH_HTML), json({ playabilityStatus: { status: "LOGIN_REQUIRED" } }));
     await expect(yt.resolveVideo("dQw4w9WgXcQ", { fetchImpl: f })).rejects.toMatchObject({ status: 403 });
+    expect(catalogCache.get(yt.WATCH_CONFIG_KEY)).toBeTruthy();
+  });
+
+  test("a refusal does drop a config old enough to actually be stale", async () => {
+    const f = mockFetch(html(WATCH_HTML), json({ playabilityStatus: { status: "LOGIN_REQUIRED" } }));
+    const realNow = Date.now;
+    // Fetch the config, then age it past the floor before the refusal lands.
+    Date.now = () => realNow() - yt.RESCRAPE_FLOOR_MS - 1000;
+    await yt.getWatchConfig(f);
+    Date.now = realNow;
+    await expect(yt.resolveVideo("dQw4w9WgXcQ", { fetchImpl: f })).rejects.toMatchObject({ status: 403 });
     expect(catalogCache.get(yt.WATCH_CONFIG_KEY)).toBeUndefined();
+  });
+
+  describe("deciding whether to scrape the watch page again", () => {
+    const aged = (ms) => ({ fetchedAt: Date.now() - ms });
+
+    test("not for a status a new visitor id cannot fix", () => {
+      expect(yt.staleEnoughToRescrape(aged(60 * 60 * 1000), "ERROR")).toBe(false);
+      expect(yt.staleEnoughToRescrape(aged(60 * 60 * 1000), "OK")).toBe(false);
+    });
+
+    test("not while the current one is younger than the floor", () => {
+      expect(yt.staleEnoughToRescrape(aged(0), "LOGIN_REQUIRED")).toBe(false);
+      expect(yt.staleEnoughToRescrape(aged(yt.RESCRAPE_FLOOR_MS - 1000), "UNPLAYABLE")).toBe(false);
+    });
+
+    test("yes once it is older than the floor", () => {
+      expect(yt.staleEnoughToRescrape(aged(yt.RESCRAPE_FLOOR_MS + 1000), "LOGIN_REQUIRED")).toBe(true);
+      expect(yt.staleEnoughToRescrape(aged(yt.RESCRAPE_FLOOR_MS + 1000), "UNPLAYABLE")).toBe(true);
+    });
+
+    test("a config with no timestamp counts as ancient", () => {
+      expect(yt.staleEnoughToRescrape({}, "LOGIN_REQUIRED")).toBe(true);
+      expect(yt.staleEnoughToRescrape(null, "LOGIN_REQUIRED")).toBe(true);
+    });
   });
 
   test("a playable video with no usable format at all is a 415", async () => {

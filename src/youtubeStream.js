@@ -66,6 +66,19 @@ const WATCH_CONFIG_TTL_MS = 30 * 60 * 1000;
 const EXPIRY_MARGIN_MS = 5 * 60 * 1000;
 
 /**
+ * The shortest gap between two scrapes of the watch page.
+ *
+ * A refusal used to drop the cached config unconditionally, so the next
+ * attempt fetched a fresh watch page. Under a sustained block that means
+ * every single press of play fetches a full HTML page from the endpoint
+ * that is already answering 429 -- the failure path generating more load
+ * against the thing rate-limiting us, which both prolongs the block and is
+ * simply rude. Re-scraping is still how a genuinely stale visitor id gets
+ * replaced; it just cannot happen more often than this.
+ */
+const RESCRAPE_FLOOR_MS = 5 * 60 * 1000;
+
+/**
  * H.264 video and AAC audio only.
  *
  * YouTube also offers VP9 and AV1 at the same resolutions, often at a lower
@@ -106,7 +119,7 @@ async function getWatchConfig(fetchImpl) {
   const html = await response.text();
   const apiKey = (API_KEY_RE.exec(html) || [])[1] || null;
   const visitorData = (VISITOR_DATA_RE.exec(html) || [])[1] || null;
-  const config = { apiKey, visitorData };
+  const config = { apiKey, visitorData, fetchedAt: Date.now() };
   catalogCache.set(WATCH_CONFIG_KEY, config, WATCH_CONFIG_TTL_MS);
   return config;
 }
@@ -142,6 +155,18 @@ async function fetchPlayerResponse(videoId, config, fetchImpl) {
 
   if (!response.ok) throw fail(`YouTube player API returned HTTP ${response.status}`, response.status);
   return response.json();
+}
+
+/**
+ * Should a refusal cause the watch page to be scraped again?
+ *
+ * Only for the statuses a new visitor id could plausibly fix, and only
+ * once the current one is older than the floor.
+ */
+function staleEnoughToRescrape(config, status) {
+  if (status !== "LOGIN_REQUIRED" && status !== "UNPLAYABLE") return false;
+  const age = Date.now() - ((config && config.fetchedAt) || 0);
+  return age >= RESCRAPE_FLOOR_MS;
 }
 
 /** When does this media URL stop working? Its own `expire` param says. */
@@ -313,9 +338,11 @@ async function resolveVideo(videoId, { fetchImpl = fetch } = {}) {
   if (status !== "OK") {
     const reason = (player.playabilityStatus && player.playabilityStatus.reason) || status;
     // LOGIN_REQUIRED here is YouTube declining to serve this caller rather
-    // than anything about the video, so the cached config is dropped: the
-    // next attempt scrapes a fresh visitor id instead of reusing a spent one.
-    if (status === "LOGIN_REQUIRED" || status === "UNPLAYABLE") catalogCache.delete(WATCH_CONFIG_KEY);
+    // than anything about the video, so a fresh visitor id is worth trying --
+    // but only if the one we hold has had a fair run. Dropping it on every
+    // refusal turns a sustained block into a watch-page fetch per press of
+    // play, against the endpoint already answering 429.
+    if (staleEnoughToRescrape(config, status)) catalogCache.delete(WATCH_CONFIG_KEY);
     throw fail(`YouTube will not serve this video: ${reason}`, 403);
   }
 
@@ -365,10 +392,12 @@ module.exports = {
   pickAdaptive,
   buildDashManifest,
   expiryOf,
+  staleEnoughToRescrape,
   codecsOf,
   isoDuration,
   ANDROID_CLIENT,
   VIDEO_ID_RE,
   WATCH_CONFIG_KEY,
-  EXPIRY_MARGIN_MS
+  EXPIRY_MARGIN_MS,
+  RESCRAPE_FLOOR_MS
 };
