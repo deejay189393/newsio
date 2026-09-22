@@ -156,7 +156,7 @@ describe("configure page — Generate install link", () => {
         { kind: "preset", id: "world", label: "World" }
       ],
       language: "en",
-      youtubePlayback: "app"
+      youtubeStreams: ["app", "youtube"]
     });
   });
 
@@ -694,6 +694,98 @@ describe("revealing an API key", () => {
   test("the page still loads without script errors", () => {
     const page = loadPage();
     toggleFor(page, "youtube").click();
+    expect(page.errors).toEqual([]);
+  });
+});
+
+
+describe("choosing and ordering the YouTube stream options", () => {
+  const rowIds = (page) =>
+    [...page.document.querySelectorAll("#yt-options .yt-option")].map((r) => r.getAttribute("data-option"));
+  const rowFor = (page, id) => page.document.querySelector(`.yt-option[data-option="${id}"]`);
+
+  const generated = (page) => {
+    const url = page.document.getElementById("manifest-url").value;
+    return decodeConfig(url.slice(BASE.length + 1, -"/manifest.json".length));
+  };
+
+  const fill = (page) => {
+    page.setKey("youtube", "AIza-key");
+    page.check("top");
+  };
+
+  test("the default order and selection are what gets generated", () => {
+    const page = loadPage();
+    expect(rowIds(page)).toEqual(["app", "youtube", "smarttube"]);
+    fill(page);
+    page.submit();
+    expect(generated(page).youtubeStreams).toEqual(["app", "youtube"]);
+  });
+
+  test("turning one on adds it, in its listed position", () => {
+    const page = loadPage();
+    rowFor(page, "smarttube").querySelector(".yt-option-on").checked = true;
+    fill(page);
+    page.submit();
+    expect(generated(page).youtubeStreams).toEqual(["app", "youtube", "smarttube"]);
+  });
+
+  test("turning one off removes it entirely", () => {
+    const page = loadPage();
+    rowFor(page, "app").querySelector(".yt-option-on").checked = false;
+    fill(page);
+    page.submit();
+    expect(generated(page).youtubeStreams).toEqual(["youtube"]);
+  });
+
+  test("moving a row up changes the order that is generated", () => {
+    const page = loadPage();
+    rowFor(page, "smarttube").querySelector(".yt-up").click();
+    rowFor(page, "smarttube").querySelector(".yt-up").click();
+    expect(rowIds(page)).toEqual(["smarttube", "app", "youtube"]);
+
+    rowFor(page, "smarttube").querySelector(".yt-option-on").checked = true;
+    fill(page);
+    page.submit();
+    expect(generated(page).youtubeStreams).toEqual(["smarttube", "app", "youtube"]);
+  });
+
+  test("moving a row down works too", () => {
+    const page = loadPage();
+    rowFor(page, "app").querySelector(".yt-down").click();
+    expect(rowIds(page)).toEqual(["youtube", "app", "smarttube"]);
+  });
+
+  test("the first row cannot move up, nor the last down", () => {
+    const page = loadPage();
+    const rows = page.document.querySelectorAll("#yt-options .yt-option");
+    expect(rows[0].querySelector(".yt-up").disabled).toBe(true);
+    expect(rows[0].querySelector(".yt-down").disabled).toBe(false);
+    expect(rows[rows.length - 1].querySelector(".yt-down").disabled).toBe(true);
+  });
+
+  test("the arrows keep up with the order after a move", () => {
+    const page = loadPage();
+    rowFor(page, "app").querySelector(".yt-down").click();
+    // "app" is no longer first, so it can move up again now.
+    expect(rowFor(page, "app").querySelector(".yt-up").disabled).toBe(false);
+    expect(rowFor(page, "youtube").querySelector(".yt-up").disabled).toBe(true);
+  });
+
+  test("turning everything off falls back rather than generating nothing playable", () => {
+    const page = loadPage();
+    ["app", "youtube", "smarttube"].forEach((id) => {
+      rowFor(page, id).querySelector(".yt-option-on").checked = false;
+    });
+    fill(page);
+    page.submit();
+    expect(generated(page).youtubeStreams).toEqual(["app", "youtube"]);
+  });
+
+  test("none of this raises a script error", () => {
+    const page = loadPage();
+    rowFor(page, "smarttube").querySelector(".yt-up").click();
+    rowFor(page, "app").querySelector(".yt-down").click();
     expect(page.errors).toEqual([]);
   });
 });

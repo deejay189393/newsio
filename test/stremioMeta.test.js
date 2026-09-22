@@ -707,16 +707,36 @@ describe("a YouTube story offers both ways to watch it", () => {
   test("the order is the user's choice, so a break in playback is reconfigurable", () => {
     const flipped = toStreams(ytArticle, {
       baseUrl: "https://newsio.up.railway.app",
-      youtubePlayback: "youtube"
+      youtubeStreams: ["youtube", "app"]
     });
     expect(flipped[0].title).toBe("Open in YouTube app (Reuters)");
     expect(flipped[1].title).toBe("Play video in app (Reuters)");
   });
 
+  test("SmartTube can lead, and sends the app-only scheme", () => {
+    const s = toStreams(ytArticle, {
+      baseUrl: "https://newsio.up.railway.app",
+      youtubeStreams: ["smarttube", "youtube", "app"]
+    });
+    expect(s).toHaveLength(3);
+    expect(s[0].title).toBe("Open in SmartTube app (Reuters)");
+    // No browser registers vnd.youtube:, so this can only reach an app.
+    expect(s[0].externalUrl).toBe("vnd.youtube:dQw4w9WgXcQ");
+  });
+
+  test("a single option means a single stream", () => {
+    const only = toStreams(ytArticle, {
+      baseUrl: "https://newsio.up.railway.app",
+      youtubeStreams: ["smarttube"]
+    });
+    expect(only).toHaveLength(1);
+    expect(only[0].externalUrl).toBe("vnd.youtube:dQw4w9WgXcQ");
+  });
+
   test("in-app leads unless the user said otherwise", () => {
     const base = { baseUrl: "https://newsio.up.railway.app" };
     expect(toStreams(ytArticle, base)[0].url).toBeTruthy();
-    expect(toStreams(ytArticle, { ...base, youtubePlayback: "app" })[0].url).toBeTruthy();
+    expect(toStreams(ytArticle, { ...base, youtubeStreams: ["app"] })[0].url).toBeTruthy();
   });
 
   test("the URL follows the host being served, so beta never points at production", () => {
@@ -788,10 +808,25 @@ describe("when YouTube is refusing to serve this server", () => {
     expect(streams({})[0].url).toContain("/manifest.mpd");
   });
 
-  test("someone who already chose the YouTube app sees no change", () => {
-    const a = streams({ youtubePlayback: "youtube", youtubeHealthy: true });
-    const b = streams({ youtubePlayback: "youtube", youtubeHealthy: false });
+  test("someone who already put an external option first sees no change", () => {
+    const a = streams({ youtubeStreams: ["youtube", "app"], youtubeHealthy: true });
+    const b = streams({ youtubeStreams: ["youtube", "app"], youtubeHealthy: false });
     expect(a[0].externalUrl).toBeTruthy();
     expect(b[0].externalUrl).toBeTruthy();
+  });
+
+  test("in-app goes to the back but keeps the others in their chosen order", () => {
+    const s = streams({ youtubeStreams: ["app", "smarttube", "youtube"], youtubeHealthy: false });
+    expect(s.map((x) => x.title)).toEqual([
+      "Open in SmartTube app (Reuters)",
+      "Open in YouTube app (Reuters)",
+      "Play video in app \u2014 unavailable right now (Reuters)"
+    ]);
+  });
+
+  test("with in-app the only option it stays, since there is nothing to lead instead", () => {
+    const s = streams({ youtubeStreams: ["app"], youtubeHealthy: false });
+    expect(s).toHaveLength(1);
+    expect(s[0].title).toContain("unavailable right now");
   });
 });

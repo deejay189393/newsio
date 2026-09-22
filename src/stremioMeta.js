@@ -1,6 +1,7 @@
 const { CONTENT_TYPE } = require("./manifest");
 const { getTopicLabel } = require("./topics");
 const { FALLBACK_POSTER, FALLBACK_BACKGROUND } = require("./fallbackImages");
+const { normalizeYoutubeStreams, externalUrlFor } = require("./youtubeStreams");
 
 /**
  * Stremio shows `releaseInfo` verbatim, so we normalize to a plain date and
@@ -393,6 +394,38 @@ const YOUTUBE_ID = /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|v\/)|
  * how HLS playlists and plain-http files still play instead of failing
  * silently.
  */
+/**
+ * One of the three ways to watch a YouTube story.
+ *
+ * In-app points at this addon's own DASH manifest. The other two are
+ * external URIs Android routes: a plain watch URL, which a browser can also
+ * take, and `vnd.youtube:`, which no browser registers and so can only reach
+ * a YouTube application.
+ */
+function buildYoutubeStream(optionId, { article, youtubeId, baseUrl, down }) {
+  const external = externalUrlFor(optionId, youtubeId);
+  if (external) {
+    const label =
+      optionId === "smarttube"
+        ? `Open in SmartTube app (${article.sourceName})`
+        : `Open in YouTube app (${article.sourceName})`;
+    return { name: "Newsio", title: label, description: label, externalUrl: external };
+  }
+
+  const label = down
+    ? `Play video in app \u2014 unavailable right now (${article.sourceName})`
+    : `Play video in app (${article.sourceName})`;
+  return {
+    name: "Newsio",
+    title: label,
+    description: down
+      ? "YouTube is refusing to serve this server at the moment. Try one of the other options."
+      : label,
+    url: `${baseUrl}/yt/${youtubeId}/manifest.mpd`,
+    behaviorHints: { filename: `${youtubeId}.mpd` }
+  };
+}
+
 /** The video id behind a YouTube story, or null if this is not one. */
 function youtubeIdOf(article) {
   const match = YOUTUBE_ID.exec(article.videoUrl || article.link || "");
@@ -449,34 +482,17 @@ function toVideoStream(article) {
  * leans on an undocumented YouTube API. If that breaks, flipping the setting
  * puts the YouTube app back on the play button without waiting for a fix.
  */
-function toStreams(article, { baseUrl, youtubePlayback = "app", youtubeHealthy = true } = {}) {
+function toStreams(article, { baseUrl, youtubeStreams, youtubeHealthy = true } = {}) {
   const youtubeId = article.provider === "youtube" && baseUrl ? youtubeIdOf(article) : null;
   if (youtubeId) {
-    // In-app playback depends on YouTube being willing to serve this host,
-    // and it sometimes is not. When the last attempt was refused, the
-    // working option leads and the other says why, so the first thing the
-    // viewer selects plays rather than erroring.
+    const chosen = normalizeYoutubeStreams(youtubeStreams);
+    // In-app playback depends on YouTube being willing to serve this server,
+    // and it sometimes is not. While it is refused the option is kept but
+    // sent to the back, so the row the viewer lands on is one that works.
     const down = !youtubeHealthy;
-    const inApp = {
-      name: "Newsio",
-      title: down
-        ? `Play video in app — unavailable right now (${article.sourceName})`
-        : `Play video in app (${article.sourceName})`,
-      description: down
-        ? "YouTube is refusing to serve this server at the moment. Try the YouTube app instead."
-        : `Play video in app (${article.sourceName})`,
-      url: `${baseUrl}/yt/${youtubeId}/manifest.mpd`,
-      behaviorHints: { filename: `${youtubeId}.mpd` }
-    };
-    const inYouTube = {
-      name: "Newsio",
-      title: `Open in YouTube app (${article.sourceName})`,
-      description: `Open in YouTube app (${article.sourceName})`,
-      externalUrl: article.link
-    };
-    // The user's preference decides the order, except when the option they
-    // preferred is the one that is currently broken.
-    return youtubePlayback === "youtube" || down ? [inYouTube, inApp] : [inApp, inYouTube];
+    const order = down ? [...chosen.filter((id) => id !== "app"), ...chosen.filter((id) => id === "app")] : chosen;
+
+    return order.map((id) => buildYoutubeStream(id, { article, youtubeId, baseUrl, down }));
   }
 
   const streams = [];
@@ -510,6 +526,7 @@ module.exports = {
   toStreams,
   toVideoStream,
   youtubeIdOf,
+  buildYoutubeStream,
   isPlayableVideo,
   formatReleaseInfo,
   buildDescription,

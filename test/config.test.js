@@ -3,28 +3,63 @@ const { encodeConfig, decodeConfig, normalizeSources, isConfigured, unusedProvid
 const CUR = { provider: "currents", apiKey: "cur-key" };
 const ND = { provider: "newsdata", apiKey: "nd-key" };
 
-describe("the YouTube playback setting", () => {
-  const { validYoutubePlayback, DEFAULT_YOUTUBE_PLAYBACK } = require("../src/config");
+describe("the YouTube stream options", () => {
+  const { normalizeYoutubeStreams, DEFAULT_YOUTUBE_STREAMS } = require("../src/youtubeStreams");
 
-  test("defaults to playing in the app", () => {
-    // In-app playback is what almost everyone wants; the setting exists so
-    // that a break in it can be worked around without a code change.
-    expect(DEFAULT_YOUTUBE_PLAYBACK).toBe("app");
-    expect(validYoutubePlayback(undefined)).toBe("app");
+  test("nothing saved means in-app first, then the YouTube app", () => {
+    // SmartTube is off by default: it is a separately installed app, and an
+    // option that opens nothing is the dead row this addon keeps removing.
+    expect(DEFAULT_YOUTUBE_STREAMS).toEqual(["app", "youtube"]);
+    expect(normalizeYoutubeStreams(undefined)).toEqual(["app", "youtube"]);
   });
 
-  test("both modes are accepted", () => {
-    expect(validYoutubePlayback("app")).toBe("app");
-    expect(validYoutubePlayback("youtube")).toBe("youtube");
+  test("the saved order is kept exactly, including all three", () => {
+    expect(normalizeYoutubeStreams(["smarttube", "youtube", "app"])).toEqual([
+      "smarttube",
+      "youtube",
+      "app"
+    ]);
   });
 
-  test.each([["nonsense"], [""], [null], [42], [{}]])("%p falls back to the default", (mode) => {
-    expect(validYoutubePlayback(mode)).toBe("app");
+  test("a single option is allowed, which is the point of the toggles", () => {
+    expect(normalizeYoutubeStreams(["app"])).toEqual(["app"]);
+    expect(normalizeYoutubeStreams(["smarttube"])).toEqual(["smarttube"]);
+  });
+
+  test("unknown ids and duplicates are dropped, order otherwise untouched", () => {
+    expect(normalizeYoutubeStreams(["youtube", "nope", "youtube", 7, null, "app"])).toEqual([
+      "youtube",
+      "app"
+    ]);
+  });
+
+  test("turning everything off falls back rather than leaving nothing to play", () => {
+    expect(normalizeYoutubeStreams([])).toEqual(["app", "youtube"]);
+    expect(normalizeYoutubeStreams(["nope"])).toEqual(["app", "youtube"]);
+  });
+
+  test("the older single-choice setting is migrated, not ignored", () => {
+    // An addon installed before this existed carries youtubePlayback in its
+    // URL; ignoring it would silently reorder someone's play button.
+    expect(normalizeYoutubeStreams(undefined, "app")).toEqual(["app", "youtube"]);
+    expect(normalizeYoutubeStreams(undefined, "youtube")).toEqual(["youtube", "app"]);
+    expect(normalizeYoutubeStreams(undefined, "nonsense")).toEqual(["app", "youtube"]);
+  });
+
+  test("an explicit list wins over the legacy setting", () => {
+    expect(normalizeYoutubeStreams(["smarttube"], "youtube")).toEqual(["smarttube"]);
   });
 
   test("it survives the round trip", () => {
+    const back = decodeConfig(
+      encodeConfig({ sources: [CUR], topics: ["top"], youtubeStreams: ["smarttube", "app"] })
+    );
+    expect(back.youtubeStreams).toEqual(["smarttube", "app"]);
+  });
+
+  test("a legacy config round-trips into the migrated list", () => {
     const back = decodeConfig(encodeConfig({ sources: [CUR], topics: ["top"], youtubePlayback: "youtube" }));
-    expect(back.youtubePlayback).toBe("youtube");
+    expect(back.youtubeStreams).toEqual(["youtube", "app"]);
   });
 });
 
@@ -38,7 +73,7 @@ describe("encode / decode round trip", () => {
         { kind: "preset", id: "top", label: "Top Stories" }
       ],
       language: "fr",
-      youtubePlayback: "app"
+      youtubeStreams: ["app", "youtube"]
     });
   });
 
@@ -67,7 +102,7 @@ describe("encode / decode round trip", () => {
       sources: [{ provider: "currents", apiKey: "100%" }],
       topics: [{ kind: "preset", id: "top", label: "Top Stories" }],
       language: "en",
-      youtubePlayback: "app"
+      youtubeStreams: ["app", "youtube"]
     });
   });
 
@@ -76,7 +111,7 @@ describe("encode / decode round trip", () => {
       sources: [],
       topics: [],
       language: "en",
-      youtubePlayback: "app"
+      youtubeStreams: ["app", "youtube"]
     });
   });
 });

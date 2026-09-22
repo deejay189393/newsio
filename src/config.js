@@ -1,5 +1,6 @@
 const { isValidProviderId, VALID_LANGUAGE_CODES, PROVIDERS } = require("./providers");
 const { normalizeTopics, toStoredTopics } = require("./topics");
+const { normalizeYoutubeStreams } = require("./youtubeStreams");
 
 /**
  * User configuration is carried in the URL as the first path segment,
@@ -22,7 +23,7 @@ function encodeConfig(config) {
       // Stored compactly: a preset is its id, a custom topic is { q }.
       topics: toStoredTopics(normalized.topics),
       language: normalized.language,
-      youtubePlayback: normalized.youtubePlayback
+      youtubeStreams: normalized.youtubeStreams
     })
   );
 }
@@ -37,24 +38,17 @@ function normalizeConfig(config) {
     sources: normalizeSources(config && config.sources),
     topics: normalizeTopics(config && config.topics),
     language: validLanguage(config && config.language),
-    youtubePlayback: validYoutubePlayback(config && config.youtubePlayback)
+    // `youtubePlayback` is the older single-choice form; an addon installed
+    // before this existed still carries it, so it is migrated rather than
+    // ignored, which would silently reorder someone's play button.
+    youtubeStreams: normalizeYoutubeStreams(
+      config && config.youtubeStreams,
+      config && config.youtubePlayback
+    )
   };
 }
 
-/**
- * Which YouTube stream Nuvio should offer first.
- *
- * "app" puts in-app playback at the top, which is what almost everyone
- * wants. The setting exists because in-app playback leans on an
- * undocumented YouTube API: if that breaks, switching to "youtube" makes the
- * play button hand off to the YouTube app instead, without waiting for a fix.
- */
-const YOUTUBE_PLAYBACK_MODES = ["app", "youtube"];
-const DEFAULT_YOUTUBE_PLAYBACK = "app";
 
-function validYoutubePlayback(mode) {
-  return YOUTUBE_PLAYBACK_MODES.includes(mode) ? mode : DEFAULT_YOUTUBE_PLAYBACK;
-}
 
 /**
  * Keeps the user's ordering, drops anything unusable, and allows each
@@ -130,8 +124,5 @@ module.exports = {
   decodeConfig,
   normalizeSources,
   isConfigured,
-  unusedProviders,
-  validYoutubePlayback,
-  YOUTUBE_PLAYBACK_MODES,
-  DEFAULT_YOUTUBE_PLAYBACK
+  unusedProviders
 };

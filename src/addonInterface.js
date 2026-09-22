@@ -88,7 +88,7 @@ function createAddonInterface() {
     return {
       streams: toStreams(article, {
         baseUrl: currentBaseUrl(),
-        youtubePlayback: config && config.youtubePlayback,
+        youtubeStreams: config && config.youtubeStreams,
         youtubeHealthy: isPlaybackHealthy()
       }),
       cacheMaxAge: 3600

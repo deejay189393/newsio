@@ -229,8 +229,40 @@ The ▶ marker still only appears where playback will really work: a story whose
 `video_url` is an embed page rather than a media file is left unmarked, because
 Stremio can only hand that to a browser.
 
-**A YouTube story gets exactly one stream, and it is a real MP4** served by
-this addon at `/yt/<videoId>.mp4`.
+**A YouTube story offers up to three ways to watch, and you choose which and
+in what order** on the configure page. Each is independently on or off, and
+the order you put them in is the order Nuvio lists them, so the first enabled
+one is what the play button lands on:
+
+| Option | What it sends | Notes |
+|---|---|---|
+| **Play in-app** | our DASH manifest | best quality YouTube offers |
+| **Open in the YouTube app** | `https://www.youtube.com/watch?v=…` | a browser can also take this |
+| **Open in the SmartTube app** | `vnd.youtube:<id>` | no browser registers it, so only an app can |
+
+The default is in-app then the YouTube app. SmartTube is off until you turn it
+on, because it is a separately installed application and an option that opens
+nothing is a dead row.
+
+Worth being precise about the two external ones, because the naming promises
+more than the platform can deliver. Nuvio opens an external stream with
+`Intent(ACTION_VIEW, Uri.parse(externalUrl))` — `Uri.parse`, not
+`Intent.parseUri`, and there is no `setPackage` anywhere in the app. So
+Android's `intent://…#Intent;package=…;end` form, the one way to name a target
+application, is read as a URI with the scheme "intent", matches nothing, and
+silently does nothing. SmartTube registers no scheme of its own either: its
+manifest claims http/https on the YouTube hosts plus `vnd.youtube` and
+`vnd.youtube.launch`, every one of which the official app also claims.
+
+So the difference is real but narrower than the labels suggest. The YouTube
+option sends a web URL, which a browser can handle; the SmartTube option sends
+`vnd.youtube:`, which no browser registers, so it can only land in a YouTube
+*application* — normally SmartTube on a television running it, since the
+official app is usually absent or SmartTube is the default handler. It is a
+preference, not a guarantee.
+
+**In-app playback is a real MP4** served by this addon at
+`/yt/<videoId>/manifest.mpd`.
 
 The obvious answer was `ytId`, which the protocol documents as playing "using
 the built-in YouTube player", and that is what an earlier version shipped
