@@ -4,7 +4,7 @@ const express = require("express");
 const { decodeConfig } = require("./src/config");
 const { withBaseUrl } = require("./src/requestContext");
 const { resolveVideo, buildDashManifest, ANDROID_CLIENT, VIDEO_ID_RE } = require("./src/youtubeStream");
-const { recordSuccess, recordFailure } = require("./src/youtubeHealth");
+const { recordSuccess, recordFailure, isPlaybackOutage } = require("./src/youtubeHealth");
 const { normalizeRange } = require("./src/byteRange");
 const { buildManifest, getUnconfiguredManifest } = require("./src/manifest");
 const { renderConfigurePage } = require("./src/configurePage");
@@ -49,12 +49,29 @@ app.use(express.static(path.join(__dirname, "public")));
  *   /yt/<id>/<itag>        one adaptive format, ranged
  *   /yt/<id>.mp4           the muxed 360p file, for a player without DASH
  */
+/**
+ * Report a failed resolve in the terms the player understands.
+ *
+ * Nuvio decides whether to retry from the HTTP status, and it treats 400,
+ * 401, 403, 404 and 410 as fatal -- one attempt and an error on screen.
+ * Everything else it retries a few times, after a delay, from
+ * `isRetryablePlaybackError`.
+ *
+ * That distinction matters because our two failure kinds are genuinely
+ * different. A private or region-locked video will never play, so 403 is
+ * right and retrying it is a waste. Being refused as a suspected bot is
+ * transient -- measured repeatedly, the block moves between containers
+ * within minutes -- so it goes out as 503, which buys the player's own
+ * retries for free. Nothing here asks YouTube for more than before: the
+ * resolve is cached, so a retry within the window costs no request at all.
+ */
 function resolveFailed(res, videoId, err) {
   // Remembered so the stream list can lead with the YouTube app while
   // playback is down, rather than offering a button that fails.
   recordFailure(err);
   console.error(`[yt] ${videoId}: ${err.message}`);
-  const status = err.status >= 400 && err.status < 600 ? err.status : 502;
+  const own = err.status >= 400 && err.status < 600 ? err.status : 502;
+  const status = isPlaybackOutage(err) ? 503 : own;
   return res.status(status).json({ error: err.message });
 }
 

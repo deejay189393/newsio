@@ -164,10 +164,11 @@ describe("GET /yt/:videoId.mp4", () => {
     expect(res.body.error).toContain("Private video");
   });
 
-  test("an unreachable YouTube during resolve is a 502", async () => {
+  test("an unreachable YouTube is reported as retryable, not fatal", async () => {
+    // Nuvio gives up on 400/401/403/404/410 and retries everything else.
     jest.spyOn(global, "fetch").mockRejectedValueOnce(new Error("ENOTFOUND"));
     const res = await request(app).get("/yt/dQw4w9WgXcQ.mp4");
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(503);
   });
 
   test("a nonsense upstream status is normalised to 502 rather than passed on", async () => {
@@ -320,10 +321,10 @@ describe("GET /yt/:videoId/:itag", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  test("a resolve failure carries its status through", async () => {
+  test("a resolve failure is reported as retryable", async () => {
     jest.spyOn(global, "fetch").mockRejectedValueOnce(new Error("ENOTFOUND"));
     const res = await request(app).get("/yt/dQw4w9WgXcQ/137");
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(503);
   });
 
   test("a media fetch failure is a 502", async () => {
@@ -454,5 +455,68 @@ describe("seeking: the range the player sends reaches YouTube in a form it accep
     const res = await request(app).head("/yt/dQw4w9WgXcQ/137");
     expect(res.headers["content-length"]).toBe("155676321");
     expect(res.headers["accept-ranges"]).toBe("bytes");
+  });
+});
+
+
+describe("telling the player which failures are worth retrying", () => {
+  // Nuvio reads the HTTP status to decide: 400, 401, 403, 404 and 410 are
+  // fatal and shown to the viewer immediately; anything else it retries a
+  // few times after a delay. So the two kinds of failure must not look alike.
+  function refuseWith(playabilityStatus, reason) {
+    return jest
+      .spyOn(global, "fetch")
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => WATCH_HTML })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ playabilityStatus: { status: playabilityStatus, reason } })
+      });
+  }
+
+  test("a bot check is transient, so it is retryable", async () => {
+    // Measured repeatedly: the block moves between containers within minutes.
+    refuseWith("LOGIN_REQUIRED", "Sign in to confirm you're not a bot");
+    const res = await request(app).get("/yt/dQw4w9WgXcQ/manifest.mpd");
+    expect(res.status).toBe(503);
+  });
+
+  test("a private video will never play, so it stays fatal", async () => {
+    // Retrying this would only put a delay in front of the same error.
+    refuseWith("UNPLAYABLE", "Private video");
+    const res = await request(app).get("/yt/dQw4w9WgXcQ/manifest.mpd");
+    expect(res.status).toBe(403);
+  });
+
+  test("a region-locked video is fatal too", async () => {
+    refuseWith("UNPLAYABLE", "Video unavailable in your country");
+    const res = await request(app).get("/yt/dQw4w9WgXcQ/manifest.mpd");
+    expect(res.status).toBe(403);
+  });
+
+  test("a bad video id stays a 400 rather than inviting retries", async () => {
+    const res = await request(app).get("/yt/short/manifest.mpd");
+    expect(res.status).toBe(400);
+  });
+
+  test("throttling is retryable", async () => {
+    jest
+      .spyOn(global, "fetch")
+      .mockResolvedValueOnce({ ok: false, status: 429, text: async () => "" });
+    const res = await request(app).get("/yt/dQw4w9WgXcQ/manifest.mpd");
+    expect(res.status).toBe(503);
+  });
+
+  test("a retry inside the cache window costs YouTube nothing", async () => {
+    // The player retrying must not turn into extra load upstream.
+    const spy = mockPlayback(
+      mediaResponse({ headers: { "content-type": "video/mp4", "content-length": "4" } })
+    );
+    await request(app).get("/yt/dQw4w9WgXcQ.mp4");
+    const afterFirst = spy.mock.calls.length;
+    spy.mockResolvedValueOnce(mediaResponse({ headers: { "content-length": "4" } }));
+    await request(app).get("/yt/dQw4w9WgXcQ.mp4");
+    // Only the media fetch repeats; the watch page and player API do not.
+    expect(spy.mock.calls.length).toBe(afterFirst + 1);
   });
 });
