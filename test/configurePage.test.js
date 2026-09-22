@@ -2,7 +2,12 @@ const { renderConfigurePage, escapeHtml, orderedProviders, REPO_URL } = require(
 const { TOPICS, LANGUAGES, PROVIDERS } = require("../src/providers");
 
 const BASE = "https://newsio.up.railway.app";
-const checkedBoxes = (html) => (html.match(/\schecked\s\/>/g) || []).length;
+// Topic checkboxes only. The YouTube stream options are checkboxes too and
+// are ticked by default, so counting every box would conflate the two.
+const checkedBoxes = (html) => {
+  const topics = html.slice(html.indexOf('id="preset-chips"'));
+  return (topics.match(/\schecked\s\/>/g) || []).length;
+};
 
 describe("escapeHtml", () => {
   test("escapes every HTML-significant character", () => {
@@ -220,36 +225,67 @@ describe("orderedProviders — the saved failover order is shown back", () => {
 });
 
 
-describe("the YouTube playback setting on the page", () => {
+describe("the YouTube stream options on the page", () => {
   const render = (existing) => renderConfigurePage({ baseUrl: BASE, existing });
+  const rows = (markup) => [...markup.matchAll(/data-option="([a-z]+)"/g)].map((m) => m[1]);
 
-  test("defaults to playing in the app", () => {
+  test("all three are listed, each with a toggle", () => {
     const markup = render(null);
-    expect(markup).toContain('<option value="app" selected>');
-    expect(markup).not.toContain('<option value="youtube" selected>');
+    expect(rows(markup)).toEqual(["app", "youtube", "smarttube"]);
+    expect((markup.match(/class="yt-option-on"/g) || []).length).toBe(3);
   });
 
-  test("a saved preference is shown back on reconfigure", () => {
+  test("by default the first two are ticked and SmartTube is not", () => {
+    const markup = render(null);
+    expect((markup.match(/class="yt-option-on" checked/g) || []).length).toBe(2);
+    const smarttube = markup.slice(markup.indexOf('data-option="smarttube"'));
+    expect(smarttube.slice(0, smarttube.indexOf("</li>"))).not.toContain("checked");
+  });
+
+  test("a saved order is shown back, enabled first", () => {
+    const markup = render({
+      sources: [],
+      topics: [],
+      language: "en",
+      youtubeStreams: ["smarttube", "app"]
+    });
+    // Chosen ones in their order, then whatever was turned off.
+    expect(rows(markup)).toEqual(["smarttube", "app", "youtube"]);
+  });
+
+  test("a disabled option is still listed, so it can be turned back on", () => {
+    const markup = render({ sources: [], topics: [], language: "en", youtubeStreams: ["app"] });
+    expect(rows(markup)).toHaveLength(3);
+    expect((markup.match(/class="yt-option-on" checked/g) || []).length).toBe(1);
+  });
+
+  test("a legacy single-choice config is shown back migrated", () => {
     const markup = render({ sources: [], topics: [], language: "en", youtubePlayback: "youtube" });
-    expect(markup).toContain('<option value="youtube" selected>');
-    expect(markup).not.toContain('<option value="app" selected>');
+    expect(rows(markup)).toEqual(["youtube", "app", "smarttube"]);
   });
 
-  test("the two choices read exactly as intended", () => {
+  test("every row can be moved", () => {
     const markup = render(null);
-    expect(markup).toContain(">Play in-app</option>");
-    expect(markup).toContain(">Open in the YouTube app</option>");
+    expect((markup.match(/class="yt-up"/g) || []).length).toBe(3);
+    expect((markup.match(/class="yt-down"/g) || []).length).toBe(3);
+  });
+
+  test("the labels read as intended", () => {
+    const markup = render(null);
+    expect(markup).toContain("Play in-app");
+    expect(markup).toContain("Open in the YouTube app");
+    expect(markup).toContain("Open in the SmartTube app");
   });
 
   test("it sits inside the YouTube card, where the key is entered", () => {
     const markup = render(null);
     const youtubeCard = markup.slice(markup.indexOf('data-provider="youtube"'));
     const nextCard = youtubeCard.indexOf('data-provider="', 1);
-    expect(youtubeCard.slice(0, nextCard)).toContain('id="youtube-playback"');
+    expect(youtubeCard.slice(0, nextCard)).toContain('id="yt-options"');
   });
 
   test("only the YouTube card has one", () => {
-    expect((render(null).match(/id="youtube-playback"/g) || []).length).toBe(1);
+    expect((render(null).match(/id="yt-options"/g) || []).length).toBe(1);
   });
 });
 
