@@ -14,8 +14,8 @@ beforeEach(() => {
 });
 
 describe("manifest basics", () => {
-  test("version is 0.12.1", () => {
-    expect(M.ADDON_VERSION).toBe("0.12.1");
+  test("version is 0.12.2", () => {
+    expect(M.ADDON_VERSION).toBe("0.12.2");
   });
 
   test("uses the short addon description", () => {
@@ -103,10 +103,10 @@ describe("configured manifest", () => {
     expect(searchable[0].id).toBe(M.SEARCH_CATALOG_ID);
   });
 
-  test("the search catalog is named for the addon, so the row reads \"Newsio\"", () => {
+  test("the search catalog is named \"News\"", () => {
     const m = M.buildManifest({ sources: [{ provider: "newsdata", apiKey: KEY }], topics: ["top"] }, BASE_URL);
-    expect(searchCatalogOf(m).name).toBe("Newsio");
-    expect(M.SEARCH_CATALOG_NAME).toBe("Newsio");
+    expect(searchCatalogOf(m).name).toBe("News");
+    expect(M.SEARCH_CATALOG_NAME).toBe("News");
   });
 
   test("the search catalog marks search required so it is not a browsable shelf", () => {
