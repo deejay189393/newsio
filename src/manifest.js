@@ -20,7 +20,7 @@ const CONTENT_TYPE = "news";
 const ID_PREFIXES = PROVIDERS.map((p) => p.idPrefix);
 
 const ADDON_ID = "org.deejay189393.newsio";
-const ADDON_VERSION = "0.12.1";
+const ADDON_VERSION = "0.12.2";
 const CONTACT_EMAIL = "deejay189393@users.noreply.github.com";
 const DESCRIPTION =
   "News on Stremio? Why not! Reads live headlines from newsdata.io, Currents, YouTube and GNews.";
@@ -33,15 +33,15 @@ const DESCRIPTION =
  * identical result row per selected topic ("Top Stories - News",
  * "Technology - News", ...) all running the same free-text query. Instead
  * the topic catalogs are browse-only and this single catalog owns search,
- * which is why it is named for the addon rather than a topic: clients label
- * the row with the catalog name, so it reads "Newsio - News".
+ * which is why it is named for the content rather than a topic: clients
+ * label the row with the catalog name followed by the type.
  *
  * `isRequired: true` on the search extra keeps it out of Discover/Home --
  * it has nothing to show without a query, and would otherwise appear as an
  * empty browsable shelf.
  */
 const SEARCH_CATALOG_ID = "search";
-const SEARCH_CATALOG_NAME = "Newsio";
+const SEARCH_CATALOG_NAME = "News";
 
 /**
  * How many catalog pages the client is told it can walk through.

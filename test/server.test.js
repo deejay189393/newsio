@@ -62,7 +62,7 @@ describe("manifest routes", () => {
     const res = await request(app).get("/manifest.json");
     expect(res.status).toBe(200);
     expect(res.body.id).toBe("org.deejay189393.newsio");
-    expect(res.body.version).toBe("0.12.1");
+    expect(res.body.version).toBe("0.12.2");
     expect(res.body.catalogs).toEqual([]);
     expect(res.body.behaviorHints.configurationRequired).toBe(true);
     expect(res.body.types).toEqual(["news"]);
@@ -71,7 +71,7 @@ describe("manifest routes", () => {
   test("a configured manifest lists the chosen topics, then the search catalog", async () => {
     const res = await request(app).get(`/${CFG()}/manifest.json`);
     expect(res.status).toBe(200);
-    expect(res.body.catalogs.map((c) => c.name)).toEqual(["Technology", "Finance & Business", "Newsio"]);
+    expect(res.body.catalogs.map((c) => c.name)).toEqual(["Technology", "Finance & Business", "News"]);
     expect(res.body.behaviorHints.configurationRequired).toBe(false);
     expect(res.body.behaviorHints.configurable).toBe(true);
   });
@@ -140,7 +140,7 @@ describe("manifest routes", () => {
     expect(searchable[0]).toEqual({
       type: "news",
       id: "search",
-      name: "Newsio",
+      name: "News",
       extra: [
         { name: "search", isRequired: true },
         { name: "skip", options: require("../src/manifest").SKIP_OPTIONS }
@@ -184,7 +184,7 @@ describe("configure / re-configure routes", () => {
     const segment = encodeURIComponent(JSON.stringify({ sources: [{ provider: "newsdata", apiKey: "K" }], topics: ["sports"], language: "de" }));
     const res = await request(app).get(`/${segment}/manifest.json`);
     expect(res.status).toBe(200);
-    expect(res.body.catalogs.map((c) => c.name)).toEqual(["Sports", "Newsio"]);
+    expect(res.body.catalogs.map((c) => c.name)).toEqual(["Sports", "News"]);
   });
 });
 
@@ -411,7 +411,7 @@ describe("end-to-end user journey", () => {
     const cfg = encodeConfig({ sources: [{ provider: "newsdata", apiKey: "K" }], topics: ["technology"], language: "en" });
     const manifest = await request(app).get(`/${cfg}/manifest.json`);
     expect(manifest.body.catalogs[0].name).toBe("Technology");
-    expect(manifest.body.catalogs.at(-1).name).toBe("Newsio");
+    expect(manifest.body.catalogs.at(-1).name).toBe("News");
 
     // 3. Stremio loads the catalog for that topic
     const catalog = await request(app).get(`/${cfg}/catalog/news/technology.json`);
