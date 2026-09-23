@@ -64,15 +64,32 @@ function makeArticleId(prefix, { id, link, title }) {
  * "www.winnipegfreepress.com" reads as "Winnipegfreepress". Better than
  * "Unknown source" on every single item, which is what the field would
  * otherwise show. Currents and NewsMCP both need it.
+ *
+ * The name is the label just before the public suffix, with a two-part
+ * country suffix ("co.kr", "com.ar") counted as one: "en.yna.co.kr" is Yna,
+ * not En. Taking the host's first label instead -- as this once did -- named
+ * Yonhap "En", Yahoo "Sports" and CNN "Edition". A label left of it still
+ * wins when it is a name rather than an edition or a language, since some
+ * brands live on a parent's domain: "timesofindia.indiatimes.com".
  */
+const SECOND_LEVEL_LABELS = new Set(["co", "com", "net", "org", "gov", "ac", "edu", "ne", "or", "go", "gob", "mil", "nic"]);
+const EDITION_LABELS = new Set([
+  "www", "www2", "www3", "m", "mobile", "amp", "en", "eng", "english",
+  "edition", "news", "sport", "sports", "world", "international"
+]);
+
 function sourceNameFromUrl(url) {
+  let labels;
   try {
-    const host = new URL(url).hostname.replace(/^www\./, "");
-    const name = host.split(".")[0];
-    return name ? name.charAt(0).toUpperCase() + name.slice(1) : "Unknown source";
+    labels = new URL(url).hostname.split(".");
   } catch (_) {
     return "Unknown source";
   }
+  const last = labels.length - 1;
+  const twoPartSuffix = labels.length > 2 && labels[last].length === 2 && SECOND_LEVEL_LABELS.has(labels[last - 1]);
+  const registrable = Math.max(0, labels.length - (twoPartSuffix ? 3 : 2));
+  const name = labels.slice(0, registrable).find((label) => !EDITION_LABELS.has(label)) || labels[registrable];
+  return name ? name.charAt(0).toUpperCase() + name.slice(1) : "Unknown source";
 }
 
 /**
