@@ -307,6 +307,28 @@ describe("collapseNearDuplicates — what the clustering missed", () => {
     ).toHaveLength(2);
   });
 
+  test("a chain of rewordings collapses into its first, even through a dropped link", () => {
+    // Brajton matches only "Brighton Defeats", which is itself a copy of the first.
+    expect(
+      collapsed(
+        mk("Brighton Beats Arsenal 3-0", "2026-09-20T12:42:00"),
+        mk("Brighton Defeats Arsenal 3-0", "2026-09-20T00:03:00"),
+        mk("Brajton Defeats Arsenal 3-0", "2026-09-20T12:15:00"),
+        mk("Arsenal Wins 1-0 Against HB Koge", "2026-09-23T00:18:00")
+      )
+    ).toEqual(["Brighton Beats Arsenal 3-0|2026-09-20T12:42:00", "Arsenal Wins 1-0 Against HB Koge|2026-09-23T00:18:00"]);
+  });
+
+  test("a preview and a half-time report are not the result", () => {
+    expect(
+      collapsed(
+        mk("Brighton Beats Arsenal 3-0"),
+        mk("Brighton Hosts Arsenal in Premier League Match"),
+        mk("Brighton Leads Arsenal 2-0 at Halftime")
+      )
+    ).toHaveLength(3);
+  });
+
   test("keeps the first, which is the higher-ranked", () => {
     expect(collapsed(mk("Brighton Beats Arsenal 3-0"), mk("Brighton Defeats Arsenal 3-0"))).toEqual([
       "Brighton Beats Arsenal 3-0|2026-09-20T12:00:00"
