@@ -6,6 +6,7 @@ const UPSTREAM_PAGE_SIZE = require("../src/providers/newsdata").UPSTREAM_PAGE_SI
 
 let app;
 beforeEach(() => {
+  delete process.env.NEWSMCP_API_KEY;
   clearAllCaches();
   jest.restoreAllMocks();
   jest.spyOn(console, "error").mockImplementation(() => {});
