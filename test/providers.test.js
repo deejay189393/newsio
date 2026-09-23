@@ -14,8 +14,8 @@ const ok = (data) => ({ ok: true, json: async () => data });
 const fail = (status, body) => ({ ok: false, status, json: async () => body });
 
 describe("the registry", () => {
-  test("offers YouTube first, then the text APIs freshest-first", () => {
-    expect(registry.PROVIDERS.map((p) => p.id)).toEqual(["youtube", "currents", "newsdata", "gnews"]);
+  test("offers YouTube first, then keyless NewsMCP, then the keyed text APIs freshest-first", () => {
+    expect(registry.PROVIDERS.map((p) => p.id)).toEqual(["youtube", "newsmcp", "currents", "newsdata", "gnews"]);
   });
 
   test("every provider satisfies the same interface", () => {
@@ -40,7 +40,8 @@ describe("the registry", () => {
     ["cu_abc", "currents"],
     ["nd_abc", "newsdata"],
     ["yt_abc", "youtube"],
-    ["gn_abc", "gnews"]
+    ["gn_abc", "gnews"],
+    ["nm_evt_abc", "newsmcp"]
   ])("%p routes back to %p", (id, provider) => {
     expect(registry.providerForArticleId(id).id).toBe(provider);
   });
@@ -92,10 +93,33 @@ describe("the registry", () => {
     expect(registry.providerSupportsTopic(undefined, "top")).toBe(false);
   });
 
-  test("every provider declares the languages the page offers", () => {
-    registry.LANGUAGES.forEach((l) => {
-      registry.PROVIDERS.forEach((p) => expect(p.languages).toContain(l.code));
+  test("every keyed provider serves every language the page offers", () => {
+    registry.PROVIDERS.filter((p) => !p.keyOptional).forEach((p) => {
+      registry.LANGUAGES.forEach((l) => expect(p.languages).toContain(l.code));
     });
+  });
+
+  test("NewsMCP declares English only, since it writes its own English headlines", () => {
+    expect(registry.getProvider("newsmcp").languages).toEqual(["en"]);
+  });
+
+  test("no provider claims a language the page does not offer", () => {
+    const offered = registry.LANGUAGES.map((l) => l.code);
+    registry.PROVIDERS.forEach((p) => p.languages.forEach((code) => expect(offered).toContain(code)));
+  });
+
+  test("only NewsMCP works without a key", () => {
+    expect(registry.PROVIDERS.filter((p) => registry.isKeyOptional(p)).map((p) => p.id)).toEqual(["newsmcp"]);
+    expect(registry.isKeyOptional(undefined)).toBe(false);
+  });
+
+  test.each([
+    ["newsmcp", "en", true],
+    ["newsmcp", "de", false],
+    ["currents", "de", true],
+    ["newsmcp", undefined, true]
+  ])("%p serves language %p: %p", (id, language, expected) => {
+    expect(registry.providerSupportsLanguage(registry.getProvider(id), language)).toBe(expected);
   });
 });
 

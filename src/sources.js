@@ -1,5 +1,11 @@
 const { articleCache, sourceCooldownCache } = require("./cache");
-const { getProvider, providerSupportsTopic, providerForArticleId } = require("./providers");
+const {
+  getProvider,
+  isKeyOptional,
+  providerSupportsTopic,
+  providerSupportsLanguage,
+  providerForArticleId
+} = require("./providers");
 
 /**
  * Reading a catalog from several news APIs, in the user's order, so that one
@@ -22,8 +28,22 @@ function isExhausted(err) {
 
 const cooldownKey = (providerId, apiKey) => `${providerId}::${String(apiKey).slice(-6)}`;
 
-function markExhausted(source, reason) {
-  sourceCooldownCache.set(cooldownKey(source.provider, source.apiKey), reason || "unavailable");
+/**
+ * The longest a quoted wait is honoured for. A limit that resets in an hour
+ * should not bench a source for a day because of one odd header.
+ */
+const MAX_COOLDOWN_MS = 60 * 60 * 1000;
+
+/**
+ * Bench a source. When the API said how long to wait -- NewsMCP's 429
+ * carries the seconds until its hourly budget refills -- that is the
+ * cooldown; otherwise the cache's default. A keyless source has an empty
+ * key, so every keyless user shares one cooldown, which is right: they share
+ * one budget.
+ */
+function markExhausted(source, reason, waitMs) {
+  const ttl = Number.isFinite(waitMs) && waitMs > 0 ? Math.min(waitMs, MAX_COOLDOWN_MS) : undefined;
+  sourceCooldownCache.set(cooldownKey(source.provider, source.apiKey), reason || "unavailable", ttl);
 }
 
 function isOnCooldown(source) {
@@ -33,15 +53,18 @@ function isOnCooldown(source) {
 /**
  * Which of the configured sources could serve this request, in order.
  *
- * A source is skipped when it is cooling off after a failure, or when its
+ * A source is skipped when it is cooling off after a failure, when its
  * provider has no category for the topic -- GNews has nothing for "Crime",
- * so asking it would waste a request to be told so.
+ * so asking it would waste a request to be told so -- or when it cannot
+ * write in the reader's language.
  */
-function usableSources(sources, { topic, query }) {
+function usableSources(sources, { topic, query, language }) {
   return (sources || [])
     .map((source) => ({ source, provider: getProvider(source.provider) }))
     .filter(({ source, provider }) => {
-      if (!provider || !source.apiKey) return false;
+      if (!provider) return false;
+      if (!source.apiKey && !isKeyOptional(provider)) return false;
+      if (!providerSupportsLanguage(provider, language)) return false;
       // A search is free text, so every provider can attempt it.
       if (!query && !providerSupportsTopic(provider, topic)) return false;
       return !isOnCooldown(source);
@@ -59,7 +82,7 @@ function usableSources(sources, { topic, query }) {
  * repeating stories the reader has already scrolled past.
  */
 async function fetchCatalogPage(sources, { topic, query, language, skip = 0 }) {
-  const candidates = usableSources(sources, { topic, query });
+  const candidates = usableSources(sources, { topic, query, language });
   const attempts = [];
 
   for (const { source, provider } of candidates) {
@@ -79,7 +102,7 @@ async function fetchCatalogPage(sources, { topic, query, language, skip = 0 }) {
       return { ...page, provider: provider.id, attempts };
     } catch (err) {
       attempts.push({ provider: provider.id, outcome: err.message });
-      if (isExhausted(err)) markExhausted(source, err.message);
+      if (isExhausted(err)) markExhausted(source, err.message, err.retryAfterMs);
       // A malformed request to one provider says nothing about the next, so
       // either way we keep going: the point is to return stories.
     }
@@ -107,14 +130,14 @@ async function getArticle(sources, id) {
   const provider = providerForArticleId(id);
   if (!provider) return null;
 
-  const source = (sources || []).find((s) => s.provider === provider.id && s.apiKey);
+  const source = (sources || []).find((s) => s.provider === provider.id && (s.apiKey || isKeyOptional(provider)));
   if (!source) return null;
 
   try {
     return await provider.getArticleById(source.apiKey, id.slice(provider.idPrefix.length));
   } catch (err) {
     console.error(`[sources] ${provider.id} lookup failed:`, err.message);
-    if (isExhausted(err)) markExhausted(source, err.message);
+    if (isExhausted(err)) markExhausted(source, err.message, err.retryAfterMs);
     return null;
   }
 }
@@ -125,5 +148,6 @@ module.exports = {
   usableSources,
   isExhausted,
   markExhausted,
-  isOnCooldown
+  isOnCooldown,
+  MAX_COOLDOWN_MS
 };

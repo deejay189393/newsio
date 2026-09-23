@@ -4,9 +4,11 @@ Newsio turns live headlines into Stremio catalogs: one catalog per topic you
 pick, searchable from inside Stremio, with real metadata for every story and a
 playable stream when the story has video.
 
-It reads from **three news APIs**, and you can configure more than one. They
-become a failover chain — when one hits its free-tier limit, Newsio moves to
-the next, so your catalogs stay full instead of going empty.
+It reads from **five news sources**, and you can use more than one. One of them,
+**NewsMCP, needs no key at all**, so a new setup works the moment it is
+installed; the other four each take a free key. Together they become a failover
+chain — when one hits its free-tier limit, Newsio moves to the next, so your
+catalogs stay full instead of going empty.
 
 **Live instance:** https://newsio.up.railway.app/configure
 
@@ -16,6 +18,7 @@ the next, so your catalogs stay full instead of going empty.
 
 | Source | Freshness | Per request | Video | Topics covered |
 |---|---|---|---|---|
+| [NewsMCP](https://newsmcp.com) — **no key** | **minutes** | 20 keyless, 50 with a free key — the whole catalog in one call | no | 15 of 17 |
 | [Currents](https://currentsapi.services) | **minutes** | 20 (a whole page, 1 credit) | no | 15 of 17 |
 | [newsdata.io](https://newsdata.io) | minutes | 10 (a page costs 2 credits) | **yes** | 17 of 17 |
 | [YouTube](https://developers.google.com/youtube/v3) | **minutes** | 50 (a page costs 1 of only 100 searches a day) | **every story** | 17 of 17 |
@@ -61,6 +64,63 @@ and Google states it plainly. A catalog page costs one, and pages already
 fetched come from cache, so ordinary scrolling is cheap; a cold jump deep into
 a catalog is capped at four.
 
+### NewsMCP
+
+[NewsMCP by NewsCatcher](https://newsmcp.com) is the one source that needs no
+key. (Not the NewsMCP that lived at newsmcp.io — that one shut down and answers
+410 on every endpoint.) Its terms license the output for exactly this use:
+shown to your own users inside your own product, as long as source links and
+dates are kept, which Newsio does.
+
+It is different from the others in ways worth knowing, all measured against the
+live API rather than taken from its docs:
+
+- **Stories, not articles.** Every outlet covering one story is merged into a
+  single item with NewsMCP's own headline and summary, and up to three outlets
+  to read it at — each offered as its own "Read on …" row.
+- **English only.** Those headlines are generated in English whatever language
+  the sources were in, so NewsMCP is skipped for any other language setting,
+  and the configure page will not let a non-English setup rely on it alone.
+- **No paging.** One call is the whole result: 20 stories keyless, 50 with a
+  free key. That call is cached for an hour and shared by everyone asking the
+  same thing.
+- **A small, shared budget.** Keyless use is 20 calls an hour *per IP* — which
+  here means shared by everyone using the same Newsio server — and one request
+  at a time, so Newsio queues its calls. When the budget runs out, NewsMCP says
+  how long until it refills, and Newsio benches it for exactly that long and
+  fails over. A [free key](https://platform.newsmcp.com/auth) lifts it to 50
+  calls an hour of your own.
+- **No pictures, no video.** Stories use Newsio's own artwork.
+
+It has no category parameter, so each topic is expressed in the labels NewsMCP
+puts on every story — an industry `sector` (Technology, Sports, Health), a typed
+`event_type` (Science is discoveries only; Crime is arrests, trials and
+investigations) or a `content_type` (Lifestyle is human-interest reporting).
+Feeds rank by `trending`: independent newsrooms weighted by freshness. Domestic
+and Video News are the two it cannot serve.
+
+Searches and custom topics needed the most care, because NewsMCP's search is
+strict boolean — every bare word is required. Passed verbatim, three of seven
+real custom topics returned nothing ("Latest Netflix Movies & Reviews" requires
+the word *Latest*). So Newsio translates plain English first:
+
+| You type | NewsMCP is asked for |
+|---|---|
+| `Indian Cricket` | `Indian Cricket`, then — only if that finds less than a full page — the rest filled from `Indian OR Cricket` |
+| `Anthropic, OpenAI, AI` | `Anthropic OR OpenAI OR AI` — a comma means "any of these" |
+| `Latest Netflix Movies & Reviews` | `Netflix Movies Reviews`, filled from `Netflix OR Movies OR Reviews` |
+| `Top Stories (Not a lot of Trump)` | the top-stories feed, with `NOT Trump` |
+| `"Tim Cook" AND NOT Apple` | exactly that — quotes or capital AND/OR/NOT are taken as written |
+
+Its clustering is also good but not perfect: one search returned six separate
+events for a single Brighton 3-0 Arsenal match. Two headlines are treated as
+the same story when their words overlap by at least 0.6 of all the words either
+uses, with at least three shared, seen within two days of each other. On real
+batches that separated cleanly: every true duplicate scored 0.60 or more and
+every distinct pair 0.50 or less.
+
+### GNews spacing
+
 GNews also refuses two requests issued back to back — measured: the second of a
 pair sent with no gap is refused outright, while the same pair a second apart
 both succeed. A 20-article page is two of its responses, so Newsio spaces them
@@ -75,10 +135,10 @@ every fresher source is already spent.
 - **Your topics become your catalogs.** Pick Technology, Finance & Business,
   World, Sports, and so on; each selected topic appears in Stremio as its own
   catalog, named after the topic.
-- **One search catalog, named "Newsio".** A single catalog owns search for the
-  whole addon, so a query returns one result row -- labelled **Newsio** -- that
-  queries newsdata.io live across every category, rather than filtering a local
-  list. The topic catalogs are browse-only.
+- **One search catalog, named "News".** A single catalog owns search for the
+  whole addon, so a query returns one result row -- labelled **News** -- that
+  searches your sources live across every category, rather than filtering a
+  local list. The topic catalogs are browse-only.
 - **Custom topics.** Anything you type becomes a catalog of its own — a saved
   search presented like any other shelf. "FIFA World Cup", "Arsenal FC",
   "semiconductor exports". Up to 12 of them.
@@ -296,16 +356,18 @@ so it is the part of this addon most likely to break without warning.
 
 ## Failover
 
-`sources` in your config is an ordered list of `{ provider, apiKey }`. The
-order is the setting: Newsio walks it and returns the first source that
-answers.
+`sources` in your config is an ordered list of `{ provider, apiKey }` — or
+just `{ provider }` for NewsMCP used without a key. The order is the setting:
+Newsio walks it and returns the first source that answers.
 
 A source is skipped before it is even tried when:
 
-- it is **cooling off** after a recent failure (ten minutes), so one spent key
-  does not cost every subsequent page a dead round trip;
+- it is **cooling off** after a recent failure — ten minutes, or exactly as long
+  as the API said to wait when it said (NewsMCP does), capped at an hour — so one
+  spent key does not cost every subsequent page a dead round trip;
 - its provider **has no category for the topic** — GNews has nothing for Crime,
-  so asking it would spend a request to be told so.
+  so asking it would spend a request to be told so;
+- it **cannot write in your language** — NewsMCP is English only.
 
 A source that is tried fails over when it **errors**, and when it returns an
 **empty first page** — a source with nothing to say about a topic should yield
@@ -318,13 +380,15 @@ limit or quota) put a key on cooldown. A malformed request to one API says
 nothing about the next, so the chain continues but that key is not branded as
 spent.
 
-Article ids carry a per-provider prefix — `cu_`, `nd_`, `gn_` — so a story
+Article ids carry a per-provider prefix — `yt_`, `nm_`, `cu_`, `nd_`, `gn_` — so a story
 opened from your library is always resolved against the API that issued it,
 whichever source happens to be serving catalogs at the time.
 
-**One caveat worth knowing:** newsdata.io and YouTube can look up a single
-article by id. Currents and GNews have no such endpoint, so a story from those
-resolvable only while it is still in the in-memory cache (one hour). Open one
+**One caveat worth knowing:** newsdata.io, YouTube and NewsMCP can look up a
+single article by id. (NewsMCP's ids change as a story grows; when an old one is
+folded into a bigger story, the lookup follows it to the new one.) Currents and
+GNews have no such endpoint, so a story from those is resolvable only while it
+is still in the in-memory cache (one hour). Open one
 from your Stremio library a day later and it will not resolve.
 
 ## Pagination

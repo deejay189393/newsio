@@ -20,10 +20,10 @@ const CONTENT_TYPE = "news";
 const ID_PREFIXES = PROVIDERS.map((p) => p.idPrefix);
 
 const ADDON_ID = "org.deejay189393.newsio";
-const ADDON_VERSION = "0.12.2";
+const ADDON_VERSION = "0.13.0";
 const CONTACT_EMAIL = "deejay189393@users.noreply.github.com";
 const DESCRIPTION =
-  "News on Stremio? Why not! Reads live headlines from newsdata.io, Currents, YouTube and GNews.";
+  "News on Stremio? Why not! Reads live headlines from YouTube, NewsMCP, Currents, newsdata.io and GNews.";
 
 /**
  * Search is served by ONE catalog for the whole addon, not by every topic.

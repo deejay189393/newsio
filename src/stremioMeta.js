@@ -367,10 +367,21 @@ function toFullMeta(article) {
     genres: buildGenres(article),
     website: article.link,
     links: [
-      { name: article.sourceName, category: "source", url: article.link },
+      ...outlets(article).map((o) => ({ name: o.name, category: "source", url: o.url })),
       ...(article.creator ? [{ name: article.creator, category: "creator", url: article.link }] : [])
     ]
   };
+}
+
+/**
+ * Every outlet a story can be read at. Most providers return one article
+ * and so one outlet; NewsMCP returns a story covered by many, with up to
+ * three of their links, and each is offered.
+ */
+function outlets(article) {
+  return Array.isArray(article.sources) && article.sources.length
+    ? article.sources
+    : [{ name: article.sourceName, url: article.link }];
 }
 
 // A media file Stremio's player can open directly.
@@ -504,23 +515,26 @@ function toStreams(article, { baseUrl, youtubeStreams, youtubeHealthy = true } =
   // differ in what they can play -- `ytId` needs a built-in YouTube player
   // and not every Stremio-compatible app has one -- so both are listed and
   // the client shows whichever it understands.
-  const readTitle =
-    article.provider === "youtube"
-      ? `Watch on YouTube (${article.sourceName})`
-      : video
-        ? `Read full story on ${article.sourceName}`
-        : `Read on ${article.sourceName}`;
-  streams.push({
-    name: "Newsio",
-    title: readTitle,
-    description: readTitle,
-    externalUrl: article.link
+  outlets(article).forEach((outlet) => {
+    const readTitle =
+      article.provider === "youtube"
+        ? `Watch on YouTube (${outlet.name})`
+        : video
+          ? `Read full story on ${outlet.name}`
+          : `Read on ${outlet.name}`;
+    streams.push({
+      name: "Newsio",
+      title: readTitle,
+      description: readTitle,
+      externalUrl: outlet.url
+    });
   });
 
   return streams;
 }
 
 module.exports = {
+  outlets,
   toMetaPreview,
   toFullMeta,
   toStreams,

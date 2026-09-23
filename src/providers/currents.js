@@ -1,4 +1,4 @@
-const { realText, makeArticleId, assembleCatalogPage, CATALOG_PAGE_SIZE } = require("../articles");
+const { realText, makeArticleId, assembleCatalogPage, sourceNameFromUrl, CATALOG_PAGE_SIZE } = require("../articles");
 const { catalogCache, articleCache } = require("../cache");
 
 const BASE_URL = "https://api.currentsapi.services/v1";
@@ -60,22 +60,6 @@ function normalize(raw) {
     creator: cleanAuthor(raw.author),
     provider: "currents"
   };
-}
-
-/**
- * Currents names no publisher, so it is taken from the article's host --
- * "www.winnipegfreepress.com" reads as "Winnipegfreepress". Better than
- * "Unknown source" on every single item, which is what the field would
- * otherwise show.
- */
-function sourceNameFromUrl(url) {
-  try {
-    const host = new URL(url).hostname.replace(/^www\./, "");
-    const name = host.split(".")[0];
-    return name ? name.charAt(0).toUpperCase() + name.slice(1) : "Unknown source";
-  } catch (_) {
-    return "Unknown source";
-  }
 }
 
 /**

@@ -1,4 +1,5 @@
 const { LANGUAGES, PROVIDERS } = require("./providers");
+const { DESCRIPTION } = require("./manifest");
 const { PRESET_TOPICS, normalizeTopics, MAX_CUSTOM_TOPICS, MAX_QUERY_LENGTH } = require("./topics");
 const { normalizeYoutubeStreams, orderedYoutubeOptions } = require("./youtubeStreams");
 
@@ -95,6 +96,18 @@ function youtubeStreamsField(chosen) {
 }
 
 
+/** Providers that work with no key, named for the page's copy. */
+const keylessLabels = PROVIDERS.filter((p) => p.keyOptional)
+  .map((p) => p.label)
+  .join(" and ");
+
+/**
+ * Providers that can only write in English. A setup whose every source is
+ * one of these cannot serve any other language, so the page says so before
+ * the user installs an addon that would show nothing.
+ */
+const ENGLISH_ONLY = PROVIDERS.filter((p) => p.languages.length === 1 && p.languages[0] === "en").map((p) => p.id);
+
 function renderConfigurePage({ baseUrl, existing }) {
   const selectedTopics = normalizeTopics((existing && existing.topics) || []);
   const language = (existing && existing.language) || "en";
@@ -108,12 +121,28 @@ function renderConfigurePage({ baseUrl, existing }) {
   const sourceCards = orderedProviders(existing)
     .map((provider) => {
       const key = savedKeys.get(provider.id) || "";
+      // A source that needs no key is switched on rather than keyed in. A
+      // new setup starts with it on, since it is free and works at once; an
+      // existing setup keeps whatever it had, so reconfiguring never quietly
+      // adds a source someone did not choose.
+      const enabled = isReconfigure ? savedKeys.has(provider.id) : true;
+      const toggle = provider.keyOptional
+        ? `
+        <label class="source-enable">
+          <input type="checkbox" class="source-on"${enabled ? " checked" : ""} />
+          <span>Use ${escapeHtml(provider.label)}</span>
+        </label>`
+        : "";
+      const linkText = provider.keyOptional
+        ? `Get a free ${escapeHtml(provider.label)} key (optional &mdash; raises the limits)`
+        : `Get a free ${escapeHtml(provider.label)} key`;
       return `
       <div class="source" data-provider="${escapeHtml(provider.id)}">
         <div class="source-head">
           <div class="source-rank" aria-hidden="true"></div>
           <div class="source-name">
             ${escapeHtml(provider.label)}
+            ${provider.keyOptional ? '<span class="chip">no key needed</span>' : ""}
             ${provider.delayed ? '<span class="chip warn">12h delay</span>' : ""}
             ${provider.supportsVideo ? '<span class="chip">video</span>' : ""}
           </div>
@@ -122,12 +151,12 @@ function renderConfigurePage({ baseUrl, existing }) {
             <button type="button" class="move-down" title="Try this source later" aria-label="Move ${escapeHtml(provider.label)} later">&#9660;</button>
           </div>
         </div>
-        <p class="source-note">${escapeHtml(provider.notes)}</p>
+        <p class="source-note">${escapeHtml(provider.notes)}</p>${toggle}
         <div class="key-row">
           <input type="password" class="source-key" placeholder="${escapeHtml(provider.keyPlaceholder)}" value="${escapeHtml(key)}" aria-label="${escapeHtml(provider.label)} key" />
           <button type="button" class="key-toggle" title="Show key" aria-label="Show ${escapeHtml(provider.label)} key" aria-pressed="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M2 12s4-6 10-6 10 6 10 6-4 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.5"/><line class="eye-slash" x1="3.5" y1="20.5" x2="20.5" y2="3.5"/></svg></button>
         </div>${provider.id === "youtube" ? youtubeStreamsField(youtubeStreams) : ""}
-        <div class="source-links"><a href="${escapeHtml(provider.signupUrl)}" target="_blank" rel="noopener">Get a free ${escapeHtml(provider.label)} key</a></div>
+        <div class="source-links"><a href="${escapeHtml(provider.signupUrl)}" target="_blank" rel="noopener">${linkText}</a></div>
       </div>`;
     })
     .join("");
@@ -233,6 +262,7 @@ function renderConfigurePage({ baseUrl, existing }) {
   }
   .source-move button:disabled { opacity: .3; cursor: default; }
   .source-note { font-size: 12px; color: var(--muted); margin: 0 0 10px; line-height: 1.5; }
+  .source-enable { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 14px; cursor: pointer; }
   .source-links { margin-top: 8px; font-size: 12px; }
   .source-links a { color: var(--accent-2); }
   #topic-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
@@ -288,7 +318,7 @@ function renderConfigurePage({ baseUrl, existing }) {
   <header>
     <img src="/logo.png" alt="Newsio" />
     <h1>Newsio</h1>
-    <p>News on Stremio? Why not! Reads live headlines from newsdata.io, Currents, YouTube and GNews.</p>
+    <p>${escapeHtml(DESCRIPTION)}</p>
   </header>
 
   ${isReconfigure ? '<div class="banner">Editing your current setup — your keys, their order and your topics are pre-filled. Generate a new link and install it to apply changes.</div>' : ""}
@@ -297,10 +327,12 @@ function renderConfigurePage({ baseUrl, existing }) {
     <div class="card">
       <h2>News sources</h2>
       <p class="lead">
-        Add a key for at least one. Add more than one and they become a failover chain:
+        ${escapeHtml(keylessLabels)} needs no key, so it is on from the start; the others each need
+        a free key. Use more than one and they become a failover chain:
         Newsio tries them <strong>top to bottom</strong> and moves to the next whenever one
         is rate-limited or down, so a spent free tier leaves your catalogs full instead of empty.
-        Use the arrows to set the order. Leave a key blank to skip that source.
+        Use the arrows to set the order. Leave a key blank to skip that source, or switch
+        ${escapeHtml(keylessLabels)} off to skip it.
       </p>
       <div id="sources-list">${sourceCards}</div>
       <div class="hint">Every key is free to obtain, and is stored only inside your personal addon URL — never on this server.</div>
@@ -368,6 +400,8 @@ function renderConfigurePage({ baseUrl, existing }) {
   // this page. Keep this block backslash-free; use string methods instead.
   // test/configurePage.dom.test.js executes this script and enforces that.
   var BASE_URL = ${jsonForScript(baseUrl)};
+  var ENGLISH_ONLY = ${jsonForScript(ENGLISH_ONLY)};
+  var NO_SOURCE_MESSAGE = ${jsonForScript(`Add a key for at least one news source, or turn on ${keylessLabels}.`)};
   var PRESETS = ${jsonForScript(PRESET_TOPICS)};
   var MAX_CUSTOM = ${MAX_CUSTOM_TOPICS};
   // The user's catalogs, in order. This array is the source of truth for
@@ -386,13 +420,21 @@ function renderConfigurePage({ baseUrl, existing }) {
     return Array.prototype.slice.call(sourcesList.querySelectorAll(".source"));
   }
 
-  // The rank badge only counts sources that actually have a key, so the
-  // number shown is the real failover position rather than a row number.
+  // A source is in use when it has a key -- or, for one that needs no key,
+  // when its switch is on.
+  function isActive(card) {
+    var toggle = card.querySelector(".source-on");
+    if (toggle) return toggle.checked;
+    return card.querySelector(".source-key").value.trim().length > 0;
+  }
+
+  // The rank badge only counts sources that are in use, so the number shown
+  // is the real failover position rather than a row number.
   function refreshRanks() {
     var cards = sourceCards();
     var rank = 0;
     cards.forEach(function (card, index) {
-      var filled = card.querySelector(".source-key").value.trim().length > 0;
+      var filled = isActive(card);
       if (filled) rank++;
       card.className = filled ? "source active" : "source";
       card.querySelector(".source-rank").textContent = filled ? String(rank) : "-";
@@ -415,7 +457,14 @@ function renderConfigurePage({ baseUrl, existing }) {
     }
   });
 
-  sourcesList.addEventListener("input", refreshRanks);
+  // Typing a key into a switchable source means using it.
+  sourcesList.addEventListener("input", function (e) {
+    var card = e.target.closest ? e.target.closest(".source") : null;
+    var toggle = card ? card.querySelector(".source-on") : null;
+    if (toggle && e.target.classList.contains("source-key") && e.target.value.trim()) toggle.checked = true;
+    refreshRanks();
+  });
+  sourcesList.addEventListener("change", refreshRanks);
 
   var topicList = document.getElementById("topic-list");
   var presetChips = document.getElementById("preset-chips");
@@ -630,11 +679,14 @@ function renderConfigurePage({ baseUrl, existing }) {
     e.preventDefault();
     errorEl.style.display = "none";
 
-    // DOM order is failover order.
+    // DOM order is failover order. A keyless source is stored without a key.
     var sources = [];
     sourceCards().forEach(function (card) {
+      if (!isActive(card)) return;
       var apiKey = card.querySelector(".source-key").value.trim();
-      if (apiKey) sources.push({ provider: card.getAttribute("data-provider"), apiKey: apiKey });
+      var entry = { provider: card.getAttribute("data-provider") };
+      if (apiKey) entry.apiKey = apiKey;
+      sources.push(entry);
     });
 
     var language = document.getElementById("language").value;
@@ -648,7 +700,12 @@ function renderConfigurePage({ baseUrl, existing }) {
     });
 
     if (sources.length === 0) {
-      showError("Please enter an API key for at least one news source.");
+      showError(NO_SOURCE_MESSAGE);
+      return;
+    }
+    var onlyEnglish = sources.every(function (s) { return ENGLISH_ONLY.indexOf(s.provider) !== -1; });
+    if (language !== "en" && onlyEnglish) {
+      showError("Your only source writes in English. Choose English as the language, or add a key for another source.");
       return;
     }
     if (topics.length === 0) {

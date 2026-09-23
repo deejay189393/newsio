@@ -306,3 +306,20 @@ describe("assembleCatalogPage — skip is an absolute item offset", () => {
     expect(p1.articles.every((a) => !/best deals/i.test(a.title))).toBe(true);
   });
 });
+
+describe("sourceNameFromUrl — a publisher named from its host", () => {
+  const { sourceNameFromUrl } = require("../src/articles");
+
+  test.each([
+    ["https://www.winnipegfreepress.com/news/1", "Winnipegfreepress"],
+    ["https://www.nampa.org/text/1", "Nampa"],
+    ["http://vorsprung-online.de/y", "Vorsprung-online"],
+    ["https://lanacion.com.ar/x", "Lanacion"]
+  ])("%p reads as %p", (url, name) => {
+    expect(sourceNameFromUrl(url)).toBe(name);
+  });
+
+  test.each([["not a url"], [""], [undefined], [null]])("%p is an unknown source, not a crash", (url) => {
+    expect(sourceNameFromUrl(url)).toBe("Unknown source");
+  });
+});

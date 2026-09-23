@@ -830,3 +830,58 @@ describe("when YouTube is refusing to serve this server", () => {
     expect(s[0].title).toContain("unavailable right now");
   });
 });
+
+describe("a story read at several outlets — NewsMCP", () => {
+  const { outlets } = require("../src/stremioMeta");
+  const newsmcp = require("../src/providers/newsmcp");
+  const story = newsmcp.normalize({
+    event_id: "evt_1",
+    headline: "German Bundesliga Kicks Off",
+    abstract: "The opening matches.",
+    last_seen: "2026-09-20T13:14:53",
+    entities: [{ name: "Bayern Munich", salience: 0.8 }],
+    sources: ["https://www.nampa.org/text/1", "https://www.lanacion.com.ar/x", "https://vorsprung-online.de/y"],
+    sector: "sports_recreation"
+  });
+
+  test("offers one read-article stream per outlet, in NewsMCP's order", () => {
+    expect(toStreams(story)).toEqual([
+      { name: "Newsio", title: "Read on Nampa", description: "Read on Nampa", externalUrl: "https://www.nampa.org/text/1" },
+      {
+        name: "Newsio",
+        title: "Read on Lanacion",
+        description: "Read on Lanacion",
+        externalUrl: "https://www.lanacion.com.ar/x"
+      },
+      {
+        name: "Newsio",
+        title: "Read on Vorsprung-online",
+        description: "Read on Vorsprung-online",
+        externalUrl: "https://vorsprung-online.de/y"
+      }
+    ]);
+  });
+
+  test("links every outlet from the detail page, keeping the source links the terms require", () => {
+    const meta = toFullMeta(story);
+    expect(meta.links).toEqual([
+      { name: "Nampa", category: "source", url: "https://www.nampa.org/text/1" },
+      { name: "Lanacion", category: "source", url: "https://www.lanacion.com.ar/x" },
+      { name: "Vorsprung-online", category: "source", url: "https://vorsprung-online.de/y" }
+    ]);
+    expect(meta.website).toBe("https://www.nampa.org/text/1");
+  });
+
+  test("shows the date it was last reported, the sector and the leading names as tags", () => {
+    const meta = toFullMeta(story);
+    expect(meta.releaseInfo).toBe("2026-09-20");
+    expect(meta.genres).toEqual(["Sports", "Bayern Munich"]);
+    expect(toMetaPreview(story).poster).toBe(FALLBACK_POSTER);
+  });
+
+  test("a story from any other provider keeps its one outlet", () => {
+    expect(outlets(textArticle)).toEqual([{ name: "Business Wire", url: "https://example.com/a2" }]);
+    expect(outlets({ ...textArticle, sources: [] })).toEqual([{ name: "Business Wire", url: "https://example.com/a2" }]);
+    expect(outlets({ ...textArticle, sources: "nope" })).toEqual([{ name: "Business Wire", url: "https://example.com/a2" }]);
+  });
+});
