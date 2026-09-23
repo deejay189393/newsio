@@ -314,9 +314,39 @@ describe("sourceNameFromUrl — a publisher named from its host", () => {
     ["https://www.winnipegfreepress.com/news/1", "Winnipegfreepress"],
     ["https://www.nampa.org/text/1", "Nampa"],
     ["http://vorsprung-online.de/y", "Vorsprung-online"],
-    ["https://lanacion.com.ar/x", "Lanacion"]
+    ["https://lanacion.com.ar/x", "Lanacion"],
+    ["https://www.lanacion.com.ar/x", "Lanacion"],
+    ["https://www.koreatimes.co.kr:443/sports/1", "Koreatimes"],
+    ["https://www.bbc.co.uk/sport/1", "Bbc"],
+    ["https://abc.net.au/news/1", "Abc"],
+    ["https://t.co/x", "T"]
   ])("%p reads as %p", (url, name) => {
     expect(sourceNameFromUrl(url)).toBe(name);
+  });
+
+  // Measured: NewsMCP's outlets for one Asian Games story included Yonhap's
+  // English edition, which the first-label rule offered as "Read on En".
+  test.each([
+    ["https://en.yna.co.kr/view/AEN1", "Yna"],
+    ["https://sports.yahoo.com/x", "Yahoo"],
+    ["https://edition.cnn.com/x", "Cnn"],
+    ["https://m.bbc.co.uk/x", "Bbc"],
+    ["https://english.kyodonews.net/x", "Kyodonews"],
+    ["https://www.news.com.au/x", "News"],
+    ["https://news.com/x", "News"]
+  ])("an edition or language prefix is not the name: %p reads as %p", (url, name) => {
+    expect(sourceNameFromUrl(url)).toBe(name);
+  });
+
+  test.each([
+    ["https://timesofindia.indiatimes.com/x", "Timesofindia"],
+    ["https://m.economictimes.indiatimes.com/x", "Economictimes"]
+  ])("a brand on its parent's domain keeps its own name: %p reads as %p", (url, name) => {
+    expect(sourceNameFromUrl(url)).toBe(name);
+  });
+
+  test("a host with an empty label is still an unknown source", () => {
+    expect(sourceNameFromUrl("https://.com/a")).toBe("Unknown source");
   });
 
   test.each([["not a url"], [""], [undefined], [null]])("%p is an unknown source, not a crash", (url) => {
