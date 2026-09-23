@@ -3,6 +3,8 @@ const nm = require("../src/providers/newsmcp");
 const registry = require("../src/providers");
 
 beforeEach(() => {
+  // Keyless unless a test gives the server a key: never inherit one.
+  delete process.env.NEWSMCP_API_KEY;
   clearAllCaches();
   jest.restoreAllMocks();
   jest.spyOn(console, "error").mockImplementation(() => {});
@@ -773,5 +775,82 @@ describe("getArticleById — when the cache cannot answer", () => {
   test("an event with nothing to read is null", async () => {
     jest.spyOn(global, "fetch").mockResolvedValueOnce(ok(event(1, { sources: [] })));
     await expect(nm.getArticleById("", "evt_1")).resolves.toBeNull();
+  });
+});
+
+describe("the server's own key — NEWSMCP_API_KEY", () => {
+  beforeEach(() => {
+    process.env.NEWSMCP_API_KEY = "server-key-123";
+  });
+  afterAll(() => {
+    delete process.env.NEWSMCP_API_KEY;
+  });
+
+  test("stands in for a reader with no key: sent in the header, and 50 asked for", async () => {
+    const fetchMock = jest.spyOn(global, "fetch").mockResolvedValueOnce(ok(batch(0, 50)));
+    await nm.fetchPage({ apiKey: "", topic: "top", skip: 0 });
+    expect(fetchMock.mock.calls[0][1].headers["x-api-key"]).toBe("server-key-123");
+    expect(urlOf(fetchMock.mock.calls[0]).searchParams.get("limit")).toBe("50");
+  });
+
+  test("never appears in the URL, where logs and proxies would see it", async () => {
+    const fetchMock = jest.spyOn(global, "fetch").mockResolvedValueOnce(ok(batch(0, 5)));
+    await nm.fetchPage({ apiKey: "", query: "London", skip: 0 });
+    expect(fetchMock.mock.calls[0][0]).not.toContain("server-key-123");
+  });
+
+  test("so a keyless reader gets two and a half pages, not one", async () => {
+    jest.spyOn(global, "fetch").mockResolvedValueOnce(ok(batch(0, 50)));
+    await nm.fetchPage({ apiKey: "", topic: "top", skip: 0 });
+    expect((await nm.fetchPage({ apiKey: "", topic: "top", skip: 20 })).articles).toHaveLength(20);
+  });
+
+  test("a reader's own key still wins", async () => {
+    const fetchMock = jest.spyOn(global, "fetch").mockResolvedValueOnce(ok(batch(0, 5)));
+    await nm.fetchPage({ apiKey: "their-own", topic: "top", skip: 0 });
+    expect(fetchMock.mock.calls[0][1].headers["x-api-key"]).toBe("their-own");
+  });
+
+  test("single-story lookups use it too", async () => {
+    const fetchMock = jest.spyOn(global, "fetch").mockResolvedValueOnce(ok(event(1)));
+    await nm.getArticleById("", "evt_1");
+    expect(fetchMock.mock.calls[0][1].headers["x-api-key"]).toBe("server-key-123");
+  });
+
+  test("readers sharing it share one queue, since they share one allowance", async () => {
+    let release;
+    const fetchMock = jest
+      .spyOn(global, "fetch")
+      .mockImplementationOnce(() => new Promise((r) => (release = r)))
+      .mockResolvedValueOnce(ok(batch(100, 2)));
+    const a = nm.fetchPage({ apiKey: "", topic: "sports", skip: 0 });
+    const b = nm.fetchPage({ apiKey: "", topic: "health", skip: 0 });
+    await new Promise((r) => setImmediate(r));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    release(ok(batch(0, 2)));
+    await Promise.all([a, b]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("surrounding whitespace in the variable is ignored", async () => {
+    process.env.NEWSMCP_API_KEY = "  server-key-123\n";
+    const fetchMock = jest.spyOn(global, "fetch").mockResolvedValueOnce(ok(batch(0, 5)));
+    await nm.fetchPage({ apiKey: "", topic: "top", skip: 0 });
+    expect(fetchMock.mock.calls[0][1].headers["x-api-key"]).toBe("server-key-123");
+  });
+
+  test("a blank variable is the same as none: keyless", async () => {
+    process.env.NEWSMCP_API_KEY = "   ";
+    const fetchMock = jest.spyOn(global, "fetch").mockResolvedValueOnce(ok(batch(0, 5)));
+    await nm.fetchPage({ apiKey: "", topic: "top", skip: 0 });
+    expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty("x-api-key");
+    expect(urlOf(fetchMock.mock.calls[0]).searchParams.get("limit")).toBe("20");
+  });
+
+  test("the configure page's description follows it", () => {
+    expect(nm.notes).toMatch(/Without a key of your own: 50 stories per catalog/);
+    delete process.env.NEWSMCP_API_KEY;
+    expect(nm.notes).toMatch(/Without a key: 20 stories per catalog and 20 requests an hour/);
+    expect(nm.serverKey()).toBe("");
   });
 });

@@ -89,7 +89,9 @@ live API rather than taken from its docs:
   at a time, so Newsio queues its calls. When the budget runs out, NewsMCP says
   how long until it refills, and Newsio benches it for exactly that long and
   fails over. A [free key](https://platform.newsmcp.com/auth) lifts it to 50
-  calls an hour of your own.
+  calls an hour of your own. A server can also hold a key of its own for
+  everyone who has none — see
+  [The server's NewsMCP key](#the-servers-newsmcp-key).
 - **No pictures, no video.** Stories use Newsio's own artwork.
 
 It has no category parameter, so each topic is expressed in the labels NewsMCP
@@ -593,8 +595,22 @@ variables are required; `PORT` is injected by the platform.
 | Variable | Purpose |
 |---|---|
 | `PORT` | Port to bind (set automatically by Railway; defaults to 3000) |
+| `NEWSMCP_API_KEY` | A NewsMCP key the server uses for every reader who has none of their own (see below) |
 | `STREMIO_ADDONS_CONFIG_SIGNATURE` | Override the built-in stremio-addons.net signature (forks only; see below) |
 | `STREMIO_ADDONS_CONFIG_ISSUER` | Override the signature issuer (defaults to `https://stremio-addons.net`) |
+
+### The server's NewsMCP key
+
+Without `NEWSMCP_API_KEY`, readers who have no NewsMCP key of their own share
+the keyless allowance: 20 calls an hour for this server's IP, 20 stories per
+catalog. With it, they share the key's instead — 50 calls an hour, 50 stories
+per catalog — and NewsMCP's rule refusing keyless calls from datacenter IPs no
+longer applies. A reader who enters their own key still uses theirs.
+
+Set it as a variable on the Railway service, never in the code: it is read
+from the environment when a request is made, sent only in the `x-api-key`
+header to `api.newsmcp.com`, and never written into a URL or a log. The public
+instance has one.
 
 ## Listing on stremio-addons.net
 

@@ -25,6 +25,9 @@ const { catalogCache, articleCache } = require("../cache");
  *   - One request in flight per caller, and an hourly call budget: 20 keyless
  *     (shared by everyone behind the same IP -- here, every Newsio user on
  *     this server), 50 with a free key.
+ *
+ * A server can hold a key of its own, NEWSMCP_API_KEY, used for every reader
+ * who has none -- see serverKey below.
  */
 
 const BASE_URL = "https://api.newsmcp.com/v0";
@@ -35,6 +38,23 @@ const ID_PREFIX = "nm_";
  * answered 403 "malicious_bot_ua" -- so the addon says what it is.
  */
 const USER_AGENT = "Newsio (+https://github.com/deejay189393/newsio)";
+
+/**
+ * The server's own key: NEWSMCP_API_KEY, set as a deployment variable and
+ * never in the code. When present it stands in for every reader who has no
+ * key of their own -- their shared allowance becomes the key's 50 calls an
+ * hour instead of the keyless 20, with 50 stories per catalog, and the
+ * keyless rule that refuses datacenter IPs stops applying. A reader's own
+ * key still wins: it is theirs alone.
+ */
+function serverKey() {
+  const key = process.env.NEWSMCP_API_KEY;
+  return typeof key === "string" ? key.trim() : "";
+}
+
+function effectiveKey(apiKey) {
+  return apiKey || serverKey();
+}
 
 /** Events per call: the keyless ceiling, and the most any plan allows. */
 const KEYLESS_LIMIT = 20;
@@ -571,8 +591,9 @@ async function fetchPage({ apiKey, topic, query, skip }, options) {
     throw err;
   }
 
-  const tier = apiKey ? "keyed" : "keyless";
-  const limit = apiKey ? KEYED_LIMIT : KEYLESS_LIMIT;
+  const key = effectiveKey(apiKey);
+  const tier = key ? "keyed" : "keyless";
+  const limit = key ? KEYED_LIMIT : KEYLESS_LIMIT;
   const cacheKey = batchKey({ ...plan.filters, relaxedQ: plan.relaxedQ }, tier);
 
   const loadPage = async (index) => {
@@ -580,7 +601,7 @@ async function fetchPage({ apiKey, topic, query, skip }, options) {
     if (index > 0) return { articles: [], hasMore: false };
     let articles = catalogCache.get(cacheKey);
     if (!articles) {
-      articles = await fetchBatch(plan, apiKey, limit, options);
+      articles = await fetchBatch(plan, key, limit, options);
       catalogCache.set(cacheKey, articles, BATCH_TTL_MS);
     }
     return { articles, hasMore: false };
@@ -598,7 +619,8 @@ async function fetchPage({ apiKey, topic, query, skip }, options) {
  * keeps the id it was asked for, since that is the one Stremio holds.
  */
 async function getArticleById(apiKey, eventId, options) {
-  const lookup = (id) => call(`/news/${encodeURIComponent(id)}`, {}, apiKey, options);
+  const key = effectiveKey(apiKey);
+  const lookup = (id) => call(`/news/${encodeURIComponent(id)}`, {}, key, options);
   let event;
   try {
     event = await lookup(eventId);
@@ -622,14 +644,26 @@ async function getArticleById(apiKey, eventId, options) {
   return resolved;
 }
 
+const ABOUT =
+  "No key needed. World news from NewsCatcher, with every outlet covering a story merged into one item. English only; no pictures or video.";
+
+/** What a reader without a key gets depends on whether the server has one. */
+const KEYLESS_LIMITS =
+  "Without a key: 20 stories per catalog and 20 requests an hour, shared by everyone using this server. A free key raises both to 50.";
+const SERVER_KEY_LIMITS =
+  "Without a key of your own: 50 stories per catalog, and 50 requests an hour shared by everyone using this server. A free key of your own gives you 50 an hour to yourself.";
+
 module.exports = {
   id: "newsmcp",
   label: "NewsMCP",
   homepage: "https://newsmcp.com",
   signupUrl: "https://platform.newsmcp.com/auth",
   keyPlaceholder: "optional — your NewsMCP key",
-  notes:
-    "No key needed. World news from NewsCatcher, with every outlet covering a story merged into one item. English only; no pictures or video. Without a key: 20 stories per catalog and 20 requests an hour, shared by everyone using this server. A free key raises both to 50.",
+  // Read when the configure page renders, so it always describes the key
+  // the server actually has.
+  get notes() {
+    return `${ABOUT} ${serverKey() ? SERVER_KEY_LIMITS : KEYLESS_LIMITS}`;
+  },
   // Works without a key; a key only raises the limits.
   keyOptional: true,
   idPrefix: ID_PREFIX,
@@ -642,6 +676,7 @@ module.exports = {
   toSearch,
   collapseNearDuplicates,
   filtersFor,
+  serverKey,
   KEYLESS_LIMIT,
   KEYED_LIMIT,
   UPSTREAM_PAGE_SIZE,
