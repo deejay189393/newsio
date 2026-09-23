@@ -62,7 +62,7 @@ describe("manifest routes", () => {
     const res = await request(app).get("/manifest.json");
     expect(res.status).toBe(200);
     expect(res.body.id).toBe("org.deejay189393.newsio");
-    expect(res.body.version).toBe("0.12.2");
+    expect(res.body.version).toBe("0.13.0");
     expect(res.body.catalogs).toEqual([]);
     expect(res.body.behaviorHints.configurationRequired).toBe(true);
     expect(res.body.types).toEqual(["news"]);
@@ -123,7 +123,7 @@ describe("manifest routes", () => {
 
   test("the served manifest carries the new short description", async () => {
     const res = await request(app).get(`/${CFG()}/manifest.json`);
-    expect(res.body.description).toBe("News on Stremio? Why not! Reads live headlines from newsdata.io, Currents, YouTube and GNews.");
+    expect(res.body.description).toBe("News on Stremio? Why not! Reads live headlines from YouTube, NewsMCP, Currents, newsdata.io and GNews.");
   });
 
   // Regression: search used to be declared on every topic catalog, so one
@@ -429,5 +429,65 @@ describe("end-to-end user journey", () => {
     // 5. user hits play -> a video stream exists for that id
     const stream = await request(app).get(`/${cfg}/stream/news/${item.id}.json`);
     expect(stream.body.streams[0].url).toBe("https://e.com/j1.mp4");
+  });
+});
+
+describe("end-to-end — a new user with no keys at all, on NewsMCP", () => {
+  test("configure -> install -> browse -> search -> open -> read, without a single key", async () => {
+    const events = [
+      {
+        event_id: "evt_a1",
+        headline: "Brighton Beats Arsenal 3-0",
+        abstract: "Brighton won at home.",
+        last_seen: "2026-09-20T12:42:00",
+        entities: [{ name: "Arsenal", salience: 0.9 }],
+        sources: ["https://www.bbc.co.uk/sport/1", "https://www.skysports.com/2"],
+        sector: "sports_recreation"
+      }
+    ];
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, status: 200, headers: { get: () => null }, json: async () => ({ events }) });
+
+    // 1. a fresh configure page starts with NewsMCP switched on
+    const page = await request(app).get("/configure");
+    expect(page.text).toContain('class="source-on" checked');
+
+    // 2. the install URL it builds carries NewsMCP with no key
+    const cfg = encodeConfig({ sources: [{ provider: "newsmcp" }], topics: ["sports", { q: "Arsenal" }], language: "en" });
+    const manifest = await request(app).get(`/${cfg}/manifest.json`);
+    expect(manifest.body.behaviorHints.configurationRequired).toBe(false);
+    expect(manifest.body.catalogs.map((c) => c.name)).toEqual(["Sports", "Arsenal", "News"]);
+    expect(manifest.body.idPrefixes).toContain("nm_");
+
+    // 3. the Sports catalog is served by NewsMCP, keyless
+    const catalog = await request(app).get(`/${cfg}/catalog/news/sports.json`);
+    expect(catalog.body.metas.map((m) => m.id)).toEqual(["nm_evt_a1"]);
+    const asked = new URL(global.fetch.mock.calls[0][0]);
+    expect(asked.searchParams.get("sector")).toBe("sports_recreation");
+    expect(global.fetch.mock.calls[0][1].headers).not.toHaveProperty("x-api-key");
+
+    // 4. the custom topic and the search box run as NewsMCP searches
+    await request(app).get(`/${cfg}/catalog/news/q_arsenal.json`);
+    const found = await request(app).get(`/${cfg}/catalog/news/search/search=brighton.json`);
+    expect(found.body.metas[0].id).toBe("nm_evt_a1");
+    const queries = global.fetch.mock.calls.map((c) => new URL(c[0]).searchParams.get("q")).filter(Boolean);
+    expect(queries).toEqual(["Arsenal", "brighton"]);
+
+    // 5. opening it shows the story, and both outlets are offered to read it at
+    const meta = await request(app).get(`/${cfg}/meta/news/nm_evt_a1.json`);
+    expect(meta.body.meta.name).toBe("Brighton Beats Arsenal 3-0");
+    expect(meta.body.meta.links.filter((l) => l.category === "source")).toHaveLength(2);
+    const stream = await request(app).get(`/${cfg}/stream/news/nm_evt_a1.json`);
+    expect(stream.body.streams.map((s) => s.externalUrl)).toEqual([
+      "https://www.bbc.co.uk/sport/1",
+      "https://www.skysports.com/2"
+    ]);
+  });
+
+  test("a German setup with only NewsMCP gets empty shelves rather than English stories", async () => {
+    global.fetch = jest.fn();
+    const cfg = encodeConfig({ sources: [{ provider: "newsmcp" }], topics: ["sports"], language: "de" });
+    const catalog = await request(app).get(`/${cfg}/catalog/news/sports.json`);
+    expect(catalog.body.metas).toEqual([]);
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });

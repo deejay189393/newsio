@@ -209,15 +209,51 @@ describe("isConfigured", () => {
   });
 });
 
+describe("a source that needs no key", () => {
+  test("NewsMCP is kept with no key at all, as a keyless source", () => {
+    expect(normalizeSources([{ provider: "newsmcp" }])).toEqual([{ provider: "newsmcp", apiKey: "" }]);
+    expect(normalizeSources([{ provider: "newsmcp", apiKey: "   " }])).toEqual([{ provider: "newsmcp", apiKey: "" }]);
+  });
+
+  test("its optional key is kept, trimmed", () => {
+    expect(normalizeSources([{ provider: "newsmcp", apiKey: " k1 " }])).toEqual([{ provider: "newsmcp", apiKey: "k1" }]);
+  });
+
+  test("a keyed provider with no key is still dropped", () => {
+    expect(normalizeSources([{ provider: "currents" }, { provider: "gnews", apiKey: "" }])).toEqual([]);
+  });
+
+  test("it still appears only once", () => {
+    expect(normalizeSources([{ provider: "newsmcp" }, { provider: "newsmcp", apiKey: "k" }])).toEqual([
+      { provider: "newsmcp", apiKey: "" }
+    ]);
+  });
+
+  test("on its own it makes a complete setup", () => {
+    expect(isConfigured({ sources: [{ provider: "newsmcp" }], topics: ["top"] })).toBe(true);
+  });
+
+  test("it is stored without an empty key, and decodes back to the same thing", () => {
+    const encoded = encodeConfig({ sources: [{ provider: "newsmcp" }, CUR], topics: ["top"], language: "en" });
+    expect(JSON.parse(decodeURIComponent(encoded)).sources).toEqual([{ provider: "newsmcp" }, CUR]);
+    expect(decodeConfig(encoded).sources).toEqual([{ provider: "newsmcp", apiKey: "" }, CUR]);
+  });
+
+  test("with a key it is stored with that key", () => {
+    const encoded = encodeConfig({ sources: [{ provider: "newsmcp", apiKey: "k1" }], topics: ["top"] });
+    expect(JSON.parse(decodeURIComponent(encoded)).sources).toEqual([{ provider: "newsmcp", apiKey: "k1" }]);
+  });
+});
+
 describe("unusedProviders", () => {
   test("lists what the user has not configured yet", () => {
-    expect(unusedProviders({ sources: [CUR] }).map((p) => p.id)).toEqual(["youtube", "newsdata", "gnews"]);
-    expect(unusedProviders({ sources: [CUR, ND] }).map((p) => p.id)).toEqual(["youtube", "gnews"]);
+    expect(unusedProviders({ sources: [CUR] }).map((p) => p.id)).toEqual(["youtube", "newsmcp", "newsdata", "gnews"]);
+    expect(unusedProviders({ sources: [CUR, ND] }).map((p) => p.id)).toEqual(["youtube", "newsmcp", "gnews"]);
   });
 
   test("lists everything when nothing is configured", () => {
-    expect(unusedProviders({}).map((p) => p.id)).toEqual(["youtube", "currents", "newsdata", "gnews"]);
-    expect(unusedProviders(null).map((p) => p.id)).toEqual(["youtube", "currents", "newsdata", "gnews"]);
+    expect(unusedProviders({}).map((p) => p.id)).toEqual(["youtube", "newsmcp", "currents", "newsdata", "gnews"]);
+    expect(unusedProviders(null).map((p) => p.id)).toEqual(["youtube", "newsmcp", "currents", "newsdata", "gnews"]);
   });
 });
 

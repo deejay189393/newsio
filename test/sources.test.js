@@ -281,3 +281,105 @@ describe("the cooldown store", () => {
     expect(isOnCooldown(CUR)).toBe(false);
   });
 });
+
+describe("a source that needs no key — NewsMCP", () => {
+  const newsmcp = require("../src/providers/newsmcp");
+  const { MAX_COOLDOWN_MS } = require("../src/sources");
+  const NM = { provider: "newsmcp", apiKey: "" };
+
+  test("is usable with no key, where a keyed provider is not", () => {
+    const usable = usableSources([NM, { provider: "currents", apiKey: "" }], { topic: "top", language: "en" });
+    expect(usable.map((u) => u.provider.id)).toEqual(["newsmcp"]);
+  });
+
+  test("is skipped for a reader who chose another language", () => {
+    expect(usableSources([NM, CUR], { topic: "top", language: "de" }).map((u) => u.provider.id)).toEqual(["currents"]);
+    expect(usableSources([NM, CUR], { query: "Bundesliga", language: "de" }).map((u) => u.provider.id)).toEqual(["currents"]);
+  });
+
+  test("is skipped for a topic it has no filter for", () => {
+    expect(usableSources([NM], { topic: "domestic", language: "en" })).toEqual([]);
+  });
+
+  test("serves a catalog keyless and is named as the source that did", async () => {
+    const spy = stub(newsmcp, async () => pageOf("nm_", 20));
+    const page = await fetchCatalogPage([NM, CUR], { topic: "top", language: "en" });
+    expect(page.provider).toBe("newsmcp");
+    expect(spy).toHaveBeenCalledWith({ apiKey: "", topic: "top", query: undefined, language: "en", skip: 0 });
+  });
+
+  test("a German catalog never reaches it", async () => {
+    const nmSpy = stub(newsmcp, async () => pageOf("nm_"));
+    stub(currents, async () => pageOf("cu_"));
+    const page = await fetchCatalogPage([NM, CUR], { topic: "top", language: "de" });
+    expect(page.provider).toBe("currents");
+    expect(nmSpy).not.toHaveBeenCalled();
+  });
+
+  test("a spent keyless budget benches it for exactly the wait NewsMCP quoted", async () => {
+    stub(newsmcp, async () => {
+      throw Object.assign(err(429, "Hourly limit reached"), { retryAfterMs: 5 * 60 * 1000 });
+    });
+    stub(currents, async () => pageOf("cu_"));
+    const now = Date.now();
+    const clock = jest.spyOn(Date, "now").mockReturnValue(now);
+
+    const page = await fetchCatalogPage([NM, CUR], { topic: "top", language: "en" });
+    expect(page.provider).toBe("currents");
+    expect(isOnCooldown(NM)).toBe(true);
+
+    clock.mockReturnValue(now + 5 * 60 * 1000 - 1000);
+    expect(isOnCooldown(NM)).toBe(true);
+    clock.mockReturnValue(now + 5 * 60 * 1000 + 1000);
+    expect(isOnCooldown(NM)).toBe(false);
+  });
+
+  test("keyless users share one bench, since they share one budget", () => {
+    markExhausted(NM, "limit");
+    expect(isOnCooldown({ provider: "newsmcp", apiKey: "" })).toBe(true);
+    expect(isOnCooldown({ provider: "newsmcp", apiKey: "someone-else-key" })).toBe(false);
+  });
+
+  test("a quoted wait is capped, so one odd header cannot bench a source for a day", () => {
+    const now = Date.now();
+    const clock = jest.spyOn(Date, "now").mockReturnValue(now);
+    markExhausted(NM, "limit", 24 * 60 * 60 * 1000);
+    clock.mockReturnValue(now + MAX_COOLDOWN_MS + 1000);
+    expect(isOnCooldown(NM)).toBe(false);
+  });
+
+  test.each([[0], [-5], [NaN], [undefined], ["600"]])("a wait of %p falls back to the default cooldown", (waitMs) => {
+    const now = Date.now();
+    const clock = jest.spyOn(Date, "now").mockReturnValue(now);
+    markExhausted(NM, "limit", waitMs);
+    clock.mockReturnValue(now + sourceCooldownCache.ttlMs - 1000);
+    expect(isOnCooldown(NM)).toBe(true);
+    clock.mockReturnValue(now + sourceCooldownCache.ttlMs + 1000);
+    expect(isOnCooldown(NM)).toBe(false);
+  });
+
+  test("a story it served resolves keyless when the cache has let it go", async () => {
+    const lookup = jest.spyOn(newsmcp, "getArticleById").mockResolvedValueOnce({ id: "nm_evt_1", title: "T" });
+    await expect(getArticle([CUR, NM], "nm_evt_1")).resolves.toEqual({ id: "nm_evt_1", title: "T" });
+    expect(lookup).toHaveBeenCalledWith("", "evt_1");
+  });
+
+  test("a lookup refused for its budget benches it for the quoted wait", async () => {
+    jest
+      .spyOn(newsmcp, "getArticleById")
+      .mockRejectedValueOnce(Object.assign(err(429, "limit"), { retryAfterMs: 60 * 1000 }));
+    const now = Date.now();
+    const clock = jest.spyOn(Date, "now").mockReturnValue(now);
+    await expect(getArticle([NM], "nm_evt_1")).resolves.toBeNull();
+    clock.mockReturnValue(now + 59 * 1000);
+    expect(isOnCooldown(NM)).toBe(true);
+    clock.mockReturnValue(now + 61 * 1000);
+    expect(isOnCooldown(NM)).toBe(false);
+  });
+
+  test("without NewsMCP in the config its ids resolve to nothing", async () => {
+    const lookup = jest.spyOn(newsmcp, "getArticleById");
+    await expect(getArticle([CUR], "nm_evt_1")).resolves.toBeNull();
+    expect(lookup).not.toHaveBeenCalled();
+  });
+});

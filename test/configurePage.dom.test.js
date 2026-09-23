@@ -56,6 +56,24 @@ function loadPage(options = {}) {
       document.querySelector(`.source[data-provider="${provider}"] .source-key`).value = v;
       document.getElementById("sources-list").dispatchEvent(new dom.window.Event("input", { bubbles: true }));
     },
+    // Types into one key field the way a person does: the event comes from
+    // the field itself, so the page can tell which card it belongs to.
+    typeKey: (provider, v) => {
+      const field = document.querySelector(`.source[data-provider="${provider}"] .source-key`);
+      field.value = v;
+      field.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    },
+    // The on/off switch a keyless source has instead of a required key.
+    setSwitch: (provider, on) => {
+      const box = document.querySelector(`.source[data-provider="${provider}"] .source-on`);
+      box.checked = on;
+      box.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    },
+    switchOf: (provider) => document.querySelector(`.source[data-provider="${provider}"] .source-on`),
+    generated: () => {
+      const url = document.getElementById("manifest-url").value;
+      return url.slice(BASE.length + 1, -"/manifest.json".length);
+    },
     click: (selector) => {
       document.querySelector(selector).dispatchEvent(new dom.window.Event("click", { bubbles: true }));
     },
@@ -140,6 +158,7 @@ describe("configure page — Generate install link", () => {
 
   test("the generated URL carries a config the server can decode back", () => {
     const page = loadPage();
+    page.setSwitch("newsmcp", false);
     page.setKey("newsdata", "pub_abc123");
     page.check("technology", "world");
     page.submit();
@@ -185,6 +204,7 @@ describe("configure page — Generate install link", () => {
 
   test("percent-encodes the config into exactly one path segment", () => {
     const page = loadPage();
+    page.setSwitch("newsmcp", false);
     page.setKey("newsdata", "pub abc/123");
     page.check("top");
     page.submit();
@@ -197,8 +217,9 @@ describe("configure page — Generate install link", () => {
 });
 
 describe("configure page — validation", () => {
-  test("refuses when no source has a key, and says so", () => {
+  test("refuses when no source is in use, and says so", () => {
     const page = loadPage();
+    page.setSwitch("newsmcp", false);
     page.check("technology");
     page.submit();
 
@@ -221,6 +242,7 @@ describe("configure page — validation", () => {
 
   test("trims surrounding whitespace from the API key", () => {
     const page = loadPage();
+    page.setSwitch("newsmcp", false);
     page.setKey("newsdata", "   pub_abc123   ");
     page.check("top");
     page.submit();
@@ -328,6 +350,7 @@ describe("configure page — script injection safety", () => {
 describe("configure page — the failover chain", () => {
   test("a key in any source is enough to generate a link", () => {
     const page = loadPage();
+    page.setSwitch("newsmcp", false);
     page.setKey("gnews", "gn_key");
     page.check("technology");
     page.submit();
@@ -353,14 +376,16 @@ describe("configure page — the failover chain", () => {
 
   test("moving a source up changes the failover order that is generated", () => {
     const page = loadPage();
+    page.setSwitch("newsmcp", false);
     page.setKey("currents", "c1");
     page.setKey("newsdata", "n1");
     page.check("top");
 
-    // YouTube heads the default chain, so the pair under test sits at 1..2.
-    expect(page.cardOrder().slice(0, 3)).toEqual(["youtube", "currents", "newsdata"]);
+    // YouTube and NewsMCP head the default chain, so the pair under test
+    // sits at 2..3.
+    expect(page.cardOrder().slice(0, 4)).toEqual(["youtube", "newsmcp", "currents", "newsdata"]);
     page.click('.source[data-provider="newsdata"] .move-up');
-    expect(page.cardOrder().slice(1, 3)).toEqual(["newsdata", "currents"]);
+    expect(page.cardOrder().slice(2, 4)).toEqual(["newsdata", "currents"]);
 
     page.submit();
     const url = page.document.getElementById("manifest-url").value;
@@ -374,7 +399,7 @@ describe("configure page — the failover chain", () => {
     page.setKey("newsdata", "n1");
     page.check("top");
     page.click('.source[data-provider="currents"] .move-down');
-    expect(page.cardOrder().slice(1, 3)).toEqual(["newsdata", "currents"]);
+    expect(page.cardOrder().slice(2, 4)).toEqual(["newsdata", "currents"]);
   });
 
   test("the first card cannot move up, nor the last down", () => {
@@ -386,6 +411,7 @@ describe("configure page — the failover chain", () => {
 
   test("a source with no key is skipped entirely", () => {
     const page = loadPage();
+    page.setSwitch("newsmcp", false);
     page.setKey("currents", "");
     page.setKey("newsdata", "n1");
     page.check("top");
@@ -397,6 +423,7 @@ describe("configure page — the failover chain", () => {
 
   test("keys are trimmed on the way into the URL", () => {
     const page = loadPage();
+    page.setSwitch("newsmcp", false);
     page.setKey("currents", "   c1   ");
     page.check("top");
     page.submit();
@@ -407,16 +434,19 @@ describe("configure page — the failover chain", () => {
 
   // The badge must show the real failover position, not a row number, or a
   // user with a gap in the list would misread their own priority order.
-  test("rank badges count only the sources that have a key", () => {
+  test("rank badges count only the sources that are in use", () => {
     const page = loadPage();
-    // Card order is the default chain: youtube, currents, newsdata, gnews.
-    expect(page.ranks()).toEqual(["-", "-", "-", "-"]);
+    // Card order is the default chain: youtube, newsmcp, currents, newsdata,
+    // gnews -- and NewsMCP starts switched on.
+    expect(page.ranks()).toEqual(["-", "1", "-", "-", "-"]);
+    page.setSwitch("newsmcp", false);
+    expect(page.ranks()).toEqual(["-", "-", "-", "-", "-"]);
     page.setKey("newsdata", "n1");
-    expect(page.ranks()).toEqual(["-", "-", "1", "-"]);
+    expect(page.ranks()).toEqual(["-", "-", "-", "1", "-"]);
     page.setKey("gnews", "g1");
-    expect(page.ranks()).toEqual(["-", "-", "1", "2"]);
+    expect(page.ranks()).toEqual(["-", "-", "-", "1", "2"]);
     page.setKey("currents", "c1");
-    expect(page.ranks()).toEqual(["-", "1", "2", "3"]);
+    expect(page.ranks()).toEqual(["-", "-", "1", "2", "3"]);
   });
 
   test("a filled source is visibly marked as active", () => {
@@ -451,6 +481,169 @@ describe("configure page — the failover chain", () => {
     page.click(".source-note");
     page.click("#sources-list");
     expect(page.cardOrder()).toEqual(before);
+  });
+});
+
+describe("configure page — NewsMCP, the source that needs no key", () => {
+  test("a new setup starts with it switched on, ranked first in use", () => {
+    const page = loadPage();
+    expect(page.switchOf("newsmcp").checked).toBe(true);
+    expect(page.document.querySelector('.source[data-provider="newsmcp"]').className).toContain("active");
+    expect(page.ranks()[1]).toBe("1");
+  });
+
+  test("with no keys at all, a new setup still generates a working link", () => {
+    const page = loadPage();
+    page.check("top");
+    page.submit();
+    expect(page.document.getElementById("error").style.display).not.toBe("block");
+    expect(decodeConfig(page.generated()).sources).toEqual([{ provider: "newsmcp", apiKey: "" }]);
+  });
+
+  test("a keyless source is stored without an empty key, keeping the URL short", () => {
+    const page = loadPage();
+    page.check("top");
+    page.submit();
+    expect(JSON.parse(decodeURIComponent(page.generated())).sources).toEqual([{ provider: "newsmcp" }]);
+  });
+
+  test("switched off, it is left out of the chain", () => {
+    const page = loadPage();
+    page.setSwitch("newsmcp", false);
+    page.setKey("currents", "c1");
+    page.check("top");
+    page.submit();
+    expect(decodeConfig(page.generated()).sources).toEqual([{ provider: "currents", apiKey: "c1" }]);
+  });
+
+  test("switched off with no keys, the page names the way out", () => {
+    const page = loadPage();
+    page.setSwitch("newsmcp", false);
+    page.check("top");
+    page.submit();
+    const error = page.document.getElementById("error");
+    expect(error.style.display).toBe("block");
+    expect(error.textContent).toBe("Add a key for at least one news source, or turn on NewsMCP.");
+  });
+
+  test("it takes its place in the chain alongside keyed sources", () => {
+    const page = loadPage();
+    page.setKey("youtube", "y1");
+    page.setKey("currents", "c1");
+    page.check("top");
+    page.submit();
+    expect(decodeConfig(page.generated()).sources).toEqual([
+      { provider: "youtube", apiKey: "y1" },
+      { provider: "newsmcp", apiKey: "" },
+      { provider: "currents", apiKey: "c1" }
+    ]);
+  });
+
+  test("an optional key is carried when given", () => {
+    const page = loadPage();
+    page.setKey("newsmcp", "  nmk_123  ");
+    page.check("top");
+    page.submit();
+    expect(decodeConfig(page.generated()).sources).toEqual([{ provider: "newsmcp", apiKey: "nmk_123" }]);
+  });
+
+  test("typing a key into it switches it on", () => {
+    const page = loadPage();
+    page.setSwitch("newsmcp", false);
+    page.typeKey("newsmcp", "nmk_123");
+    expect(page.switchOf("newsmcp").checked).toBe(true);
+    expect(page.ranks()[1]).toBe("1");
+  });
+
+  test("typing into a keyed source leaves the switch alone", () => {
+    const page = loadPage();
+    page.setSwitch("newsmcp", false);
+    page.typeKey("currents", "c1");
+    expect(page.switchOf("newsmcp").checked).toBe(false);
+  });
+
+  test("clearing its key does not switch it off", () => {
+    const page = loadPage();
+    page.typeKey("newsmcp", "nmk_123");
+    page.typeKey("newsmcp", "");
+    expect(page.switchOf("newsmcp").checked).toBe(true);
+  });
+
+  test("switched off, a key typed earlier is not carried", () => {
+    const page = loadPage();
+    page.typeKey("newsmcp", "nmk_123");
+    page.setSwitch("newsmcp", false);
+    page.setKey("currents", "c1");
+    page.check("top");
+    page.submit();
+    expect(decodeConfig(page.generated()).sources.map((s) => s.provider)).toEqual(["currents"]);
+  });
+
+  test("refuses a non-English setup whose only source writes in English", () => {
+    const page = loadPage();
+    page.check("top");
+    page.document.getElementById("language").value = "de";
+    page.submit();
+    const error = page.document.getElementById("error");
+    expect(error.style.display).toBe("block");
+    expect(error.textContent).toContain("writes in English");
+    expect(page.document.getElementById("result").className).not.toContain("show");
+  });
+
+  test("a non-English setup is fine once another source is keyed", () => {
+    const page = loadPage();
+    page.setKey("newsdata", "n1");
+    page.check("top");
+    page.document.getElementById("language").value = "de";
+    page.submit();
+    expect(page.document.getElementById("error").style.display).not.toBe("block");
+    expect(decodeConfig(page.generated()).language).toBe("de");
+  });
+
+  test("reconfiguring a setup that never had it does not quietly add it", () => {
+    const page = loadPage({ existing: { sources: [{ provider: "currents", apiKey: "c1" }], topics: ["top"], language: "en" } });
+    expect(page.switchOf("newsmcp").checked).toBe(false);
+    page.submit();
+    expect(decodeConfig(page.generated()).sources).toEqual([{ provider: "currents", apiKey: "c1" }]);
+  });
+
+  test("reconfiguring a keyless setup keeps it on and regenerates it unchanged", () => {
+    const existing = {
+      sources: [
+        { provider: "newsmcp", apiKey: "" },
+        { provider: "gnews", apiKey: "g1" }
+      ],
+      topics: ["top"],
+      language: "en"
+    };
+    const page = loadPage({ existing });
+    expect(page.cardOrder().slice(0, 2)).toEqual(["newsmcp", "gnews"]);
+    expect(page.switchOf("newsmcp").checked).toBe(true);
+    page.submit();
+    expect(decodeConfig(page.generated()).sources).toEqual(existing.sources);
+  });
+
+  test("reconfiguring a keyed setup shows its key back", () => {
+    const page = loadPage({ existing: { sources: [{ provider: "newsmcp", apiKey: "nmk_9" }], topics: ["top"], language: "en" } });
+    expect(page.document.querySelector('.source[data-provider="newsmcp"] .source-key').value).toBe("nmk_9");
+    expect(page.switchOf("newsmcp").checked).toBe(true);
+  });
+
+  test("only NewsMCP has a switch; every other source is keyed", () => {
+    const page = loadPage();
+    const switched = Array.from(page.document.querySelectorAll(".source-on")).map((box) =>
+      box.closest(".source").getAttribute("data-provider")
+    );
+    expect(switched).toEqual(["newsmcp"]);
+  });
+
+  test("none of this raises a script error", () => {
+    const page = loadPage();
+    page.setSwitch("newsmcp", false);
+    page.typeKey("newsmcp", "k");
+    page.check("top");
+    page.submit();
+    expect(page.errors).toEqual([]);
   });
 });
 
@@ -682,6 +875,7 @@ describe("revealing an API key", () => {
 
   test("revealing a key does not disturb what gets generated", () => {
     const page = loadPage();
+    page.setSwitch("newsmcp", false);
     page.setKey("newsdata", "pub_abc");
     toggleFor(page, "newsdata").click();
     page.check("top");

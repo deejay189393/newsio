@@ -190,26 +190,28 @@ describe("renderConfigurePage — re-configuration", () => {
 describe("orderedProviders — the saved failover order is shown back", () => {
   test("saved sources come first, in their order", () => {
     const existing = { sources: [{ provider: "gnews", apiKey: "g" }, { provider: "newsdata", apiKey: "n" }] };
-    expect(orderedProviders(existing).map((p) => p.id)).toEqual(["gnews", "newsdata", "youtube", "currents"]);
+    expect(orderedProviders(existing).map((p) => p.id)).toEqual(["gnews", "newsdata", "youtube", "newsmcp", "currents"]);
   });
 
   test("unconfigured providers follow, in the default order", () => {
     expect(orderedProviders({ sources: [{ provider: "newsdata", apiKey: "n" }] }).map((p) => p.id)).toEqual([
       "newsdata",
       "youtube",
+      "newsmcp",
       "currents",
       "gnews"
     ]);
   });
 
   test("with nothing saved the default order stands", () => {
-    expect(orderedProviders(null).map((p) => p.id)).toEqual(["youtube", "currents", "newsdata", "gnews"]);
-    expect(orderedProviders({}).map((p) => p.id)).toEqual(["youtube", "currents", "newsdata", "gnews"]);
+    expect(orderedProviders(null).map((p) => p.id)).toEqual(["youtube", "newsmcp", "currents", "newsdata", "gnews"]);
+    expect(orderedProviders({}).map((p) => p.id)).toEqual(["youtube", "newsmcp", "currents", "newsdata", "gnews"]);
   });
 
   test("an unknown saved provider is ignored rather than crashing the page", () => {
     expect(orderedProviders({ sources: [{ provider: "nope", apiKey: "x" }] }).map((p) => p.id)).toEqual([
       "youtube",
+      "newsmcp",
       "currents",
       "newsdata",
       "gnews"
@@ -220,10 +222,53 @@ describe("orderedProviders — the saved failover order is shown back", () => {
     const existing = { sources: [{ provider: "gnews", apiKey: "g" }], topics: [], language: "en" };
     const markup = renderConfigurePage({ baseUrl: BASE, existing });
     const order = [...markup.matchAll(/data-provider="([a-z]+)"/g)].map((m) => m[1]);
-    expect(order).toEqual(["gnews", "youtube", "currents", "newsdata"]);
+    expect(order).toEqual(["gnews", "youtube", "newsmcp", "currents", "newsdata"]);
   });
 });
 
+
+describe("the NewsMCP card", () => {
+  const render = (existing) => renderConfigurePage({ baseUrl: BASE, existing });
+  const card = (markup) => {
+    const start = markup.indexOf('data-provider="newsmcp"');
+    return markup.slice(start, markup.indexOf('<div class="source"', start + 1));
+  };
+
+  test("says plainly that it needs no key", () => {
+    const markup = card(render(null));
+    expect(markup).toContain('<span class="chip">no key needed</span>');
+    expect(markup).toContain("Use NewsMCP");
+    expect(markup).toContain("Get a free NewsMCP key (optional &mdash; raises the limits)");
+  });
+
+  test("starts switched on for a new setup", () => {
+    expect(card(render(null))).toContain('class="source-on" checked');
+  });
+
+  test("starts switched off when reconfiguring a setup that did not use it", () => {
+    const markup = card(render({ sources: [{ provider: "gnews", apiKey: "g" }], topics: [], language: "en" }));
+    expect(markup).toContain('class="source-on"');
+    expect(markup).not.toContain('class="source-on" checked');
+  });
+
+  test("keyed sources keep their plain key link and no switch", () => {
+    const markup = render(null);
+    const gnews = markup.slice(markup.indexOf('data-provider="gnews"'));
+    expect(gnews).toContain("Get a free GNews key</a>");
+    expect(gnews.slice(0, gnews.indexOf("source-links"))).not.toContain("source-on");
+  });
+
+  test("the lead names the keyless source and the header lists every source", () => {
+    const markup = render(null);
+    expect(markup).toContain("NewsMCP needs no key, so it is on from the start");
+    expect(markup).toContain("Leave a key blank to skip that source, or switch\n        NewsMCP off to skip it.");
+    expect(markup).toContain("Reads live headlines from YouTube, NewsMCP, Currents, newsdata.io and GNews.");
+  });
+
+  test("the page script knows which sources write English only", () => {
+    expect(render(null)).toContain('var ENGLISH_ONLY = ["newsmcp"];');
+  });
+});
 
 describe("the YouTube stream options on the page", () => {
   const render = (existing) => renderConfigurePage({ baseUrl: BASE, existing });

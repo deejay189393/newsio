@@ -60,6 +60,22 @@ function makeArticleId(prefix, { id, link, title }) {
 }
 
 /**
+ * A publisher name taken from an article's host, for APIs that name none --
+ * "www.winnipegfreepress.com" reads as "Winnipegfreepress". Better than
+ * "Unknown source" on every single item, which is what the field would
+ * otherwise show. Currents and NewsMCP both need it.
+ */
+function sourceNameFromUrl(url) {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    const name = host.split(".")[0];
+    return name ? name.charAt(0).toUpperCase() + name.slice(1) : "Unknown source";
+  } catch (_) {
+    return "Unknown source";
+  }
+}
+
+/**
  * Neither newsdata.io nor Currents flags advertising. Tested directly: they
  * expose content-type fields and duplicate flags, and nothing marking
  * sponsored or affiliate content -- a plain affiliate post ("Power outages
@@ -171,6 +187,7 @@ module.exports = {
   decodeEntities,
   realText,
   makeArticleId,
+  sourceNameFromUrl,
   isLowQuality,
   assembleCatalogPage,
   LOW_QUALITY_SOURCE_PRIORITY

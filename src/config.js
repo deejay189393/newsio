@@ -1,4 +1,4 @@
-const { isValidProviderId, VALID_LANGUAGE_CODES, PROVIDERS } = require("./providers");
+const { isValidProviderId, isKeyOptional, getProvider, VALID_LANGUAGE_CODES, PROVIDERS } = require("./providers");
 const { normalizeTopics, toStoredTopics } = require("./topics");
 const { normalizeYoutubeStreams } = require("./youtubeStreams");
 
@@ -10,7 +10,9 @@ const { normalizeYoutubeStreams } = require("./youtubeStreams");
  *     encodeURIComponent(JSON.stringify({ sources, topics, language }))
  *
  * `sources` is an ordered list of { provider, apiKey } -- the order is the
- * failover order, so the first one that answers serves the request.
+ * failover order, so the first one that answers serves the request. A
+ * provider that works without a key (NewsMCP) may appear as just
+ * { provider }, which is how it is stored when no key was given.
  *
  * Nothing is persisted server-side: the user's keys live only inside their
  * own personal addon URL.
@@ -19,7 +21,9 @@ function encodeConfig(config) {
   const normalized = normalizeConfig(config);
   return encodeURIComponent(
     JSON.stringify({
-      sources: normalized.sources,
+      // Every byte of this URL rides on every request, so a keyless source
+      // is stored without an empty key.
+      sources: normalized.sources.map((s) => (s.apiKey ? s : { provider: s.provider })),
       // Stored compactly: a preset is its id, a custom topic is { q }.
       topics: toStoredTopics(normalized.topics),
       language: normalized.language,
@@ -54,6 +58,10 @@ function normalizeConfig(config) {
  * Keeps the user's ordering, drops anything unusable, and allows each
  * provider only once -- two keys for the same API would fail over into the
  * same quota.
+ *
+ * A source with no key is unusable, except for a provider that needs none;
+ * that one is kept with an empty key, which is what "keyless" means to the
+ * rest of the addon.
  */
 function normalizeSources(sources) {
   if (!Array.isArray(sources)) return [];
@@ -63,7 +71,8 @@ function normalizeSources(sources) {
     if (!entry || typeof entry !== "object") continue;
     const provider = entry.provider;
     const apiKey = typeof entry.apiKey === "string" ? entry.apiKey.trim() : "";
-    if (!isValidProviderId(provider) || !apiKey || seen.has(provider)) continue;
+    if (!isValidProviderId(provider) || seen.has(provider)) continue;
+    if (!apiKey && !isKeyOptional(getProvider(provider))) continue;
     seen.add(provider);
     normalized.push({ provider, apiKey });
   }
