@@ -336,15 +336,23 @@ function isSameStory(a, b) {
   return a.at === null || b.at === null || Math.abs(a.at - b.at) <= SAME_STORY_WINDOW_MS;
 }
 
-/** Keeps the first -- the higher-ranked -- of each set of near-duplicates. */
+/**
+ * Keeps the first -- the higher-ranked -- of each set of near-duplicates.
+ *
+ * Each headline is compared with every one already seen, the dropped ones
+ * included, so a chain of rewordings collapses into its first: live, "Brajton
+ * Defeats Arsenal 3-0" matched only "Brighton Defeats Arsenal 3-0", which
+ * had itself already been dropped as a copy of "Brighton Beats Arsenal 3-0".
+ * Compared with the kept ones alone, the transliteration slipped through.
+ */
 function collapseNearDuplicates(articles) {
   const kept = [];
   const seen = [];
   articles.forEach((article) => {
     const story = { words: headlineWords(article.title), at: seenAt(article) };
-    if (seen.some((prior) => isSameStory(story, prior))) return;
-    kept.push(article);
+    const duplicate = seen.some((prior) => isSameStory(story, prior));
     seen.push(story);
+    if (!duplicate) kept.push(article);
   });
   return kept;
 }
