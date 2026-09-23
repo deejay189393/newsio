@@ -66,6 +66,21 @@ const REQUEST_TIMEOUT_MS = 15000;
 const COLLISION_RETRY_MS = 1500;
 
 /**
+ * A 503 means NewsMCP's index is overloaded -- "Please try again in a few
+ * seconds" -- and its docs ask for one retry after a short pause. This is not
+ * hypothetical: the very first call production made after this shipped got
+ * exactly that, while the same query from elsewhere succeeded.
+ */
+const OVERLOAD_RETRY_MS = 3000;
+
+/**
+ * How long an overload that survives its retry benches NewsMCP, when the
+ * answer quotes no wait. Keyless users share one bench, so the failover
+ * default of ten minutes would take the source from everyone over a blip.
+ */
+const OVERLOAD_BENCH_MS = 60 * 1000;
+
+/**
  * Canonical topic -> the filters that select it.
  *
  * NewsMCP has no category parameter. It labels every event with an industry
@@ -477,17 +492,26 @@ async function request(path, params, apiKey, { wait = sleep, retried = false } =
 
   if (response.ok && body) return body;
 
-  const wait429 = response.status === 429 ? retryAfterMs(response, body) : null;
-  if (response.status === 429 && !wait429 && !retried) {
-    await wait(COLLISION_RETRY_MS);
+  const { status } = response;
+  const quoted = status === 429 || status === 503 ? retryAfterMs(response, body) : null;
+
+  // Two answers ask for one retry after a short pause: a 429 quoting no wait,
+  // which means two calls were in flight at once, and a 503, which means the
+  // index is overloaded.
+  const collision = status === 429 && !quoted;
+  if (!retried && (collision || status === 503)) {
+    await wait(collision ? COLLISION_RETRY_MS : OVERLOAD_RETRY_MS);
     return request(path, params, apiKey, { wait, retried: true });
   }
 
-  const message = (body && body.message) || `NewsMCP returned HTTP ${response.status}`;
+  const message = (body && body.message) || `NewsMCP returned HTTP ${status}`;
   const err = new Error(message);
-  err.status = response.ok ? 502 : response.status;
+  err.status = response.ok ? 502 : status;
   if (body && body.error_code) err.code = body.error_code;
-  if (wait429) err.retryAfterMs = wait429;
+  // How long failover should leave NewsMCP alone: what the answer said, or
+  // for an overload that said nothing, a minute rather than the default ten.
+  if (quoted) err.retryAfterMs = quoted;
+  else if (status === 503) err.retryAfterMs = OVERLOAD_BENCH_MS;
   throw err;
 }
 
@@ -624,6 +648,8 @@ module.exports = {
   BATCH_TTL_MS,
   REQUEST_TIMEOUT_MS,
   COLLISION_RETRY_MS,
+  OVERLOAD_RETRY_MS,
+  OVERLOAD_BENCH_MS,
   USER_AGENT,
   CATALOG_PAGE_SIZE
 };
