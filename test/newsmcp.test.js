@@ -6,6 +6,11 @@ beforeEach(() => {
   clearAllCaches();
   jest.restoreAllMocks();
   jest.spyOn(console, "error").mockImplementation(() => {});
+  // A retry this suite did not plan for must fail loudly, never reach the
+  // real API: every test queues exactly the answers it expects.
+  jest.spyOn(global, "fetch").mockImplementation(async (url) => {
+    throw new Error(`unexpected network call: ${url}`);
+  });
 });
 
 const headersOf = (h = {}) => ({ get: (k) => (k.toLowerCase() in h ? h[k.toLowerCase()] : null) });
@@ -547,8 +552,49 @@ describe("errors, as the failover chain needs to read them", () => {
   });
 
   test("an error page that is not JSON still reports its status", async () => {
-    jest.spyOn(global, "fetch").mockResolvedValueOnce(notJson(503));
-    await expect(fetchTop()).rejects.toMatchObject({ status: 503, message: "NewsMCP returned HTTP 503" });
+    jest.spyOn(global, "fetch").mockResolvedValueOnce(notJson(500));
+    await expect(fetchTop()).rejects.toMatchObject({ status: 500, message: "NewsMCP returned HTTP 500" });
+  });
+
+  test("an overloaded index is retried once, after a few seconds", async () => {
+    const wait = jest.fn(async () => {});
+    const fetchMock = jest
+      .spyOn(global, "fetch")
+      .mockResolvedValueOnce(
+        fail(503, { message: "The system is currently overloaded. Please try again in a few seconds.", error_code: "service_overloaded" })
+      )
+      .mockResolvedValueOnce(ok(batch(0, 20)));
+    const page = await fetchTop({ wait });
+    expect(page.articles).toHaveLength(20);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(wait).toHaveBeenCalledWith(nm.OVERLOAD_RETRY_MS);
+  });
+
+  test("an overload that survives its retry benches NewsMCP for a minute, not ten", async () => {
+    const fetchMock = jest.spyOn(global, "fetch").mockResolvedValue(fail(503, { message: "overloaded", error_code: "service_overloaded" }));
+    const err = await fetchTop(noWait).catch((e) => e);
+    expect(err).toMatchObject({ status: 503, code: "service_overloaded", retryAfterMs: nm.OVERLOAD_BENCH_MS });
+    expect(nm.OVERLOAD_BENCH_MS).toBe(60 * 1000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("an overload that quotes a wait is benched for that long", async () => {
+    jest.spyOn(global, "fetch").mockResolvedValue(fail(503, null, { "retry-after": "20" }));
+    await expect(fetchTop(noWait)).rejects.toMatchObject({ status: 503, retryAfterMs: 20000 });
+  });
+
+  test("an overloaded error page that is not JSON is still retried and benched", async () => {
+    const fetchMock = jest.spyOn(global, "fetch").mockResolvedValue(notJson(503));
+    await expect(fetchTop(noWait)).rejects.toMatchObject({ status: 503, retryAfterMs: nm.OVERLOAD_BENCH_MS });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  test("other server errors are not retried, and leave the bench to failover's default", async () => {
+    const fetchMock = jest.spyOn(global, "fetch").mockResolvedValueOnce(fail(500, { message: "boom" }));
+    const err = await fetchTop(noWait).catch((e) => e);
+    expect(err).toMatchObject({ status: 500 });
+    expect(err.retryAfterMs).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   test("a spent budget quotes its wait, which the error carries; no retry", async () => {
@@ -604,8 +650,8 @@ describe("errors, as the failover chain needs to read them", () => {
   });
 
   test("a failure is not cached: the next request asks again", async () => {
-    const fetchMock = jest.spyOn(global, "fetch").mockResolvedValueOnce(notJson(503)).mockResolvedValueOnce(ok(batch(0, 3)));
-    await expect(fetchTop()).rejects.toMatchObject({ status: 503 });
+    const fetchMock = jest.spyOn(global, "fetch").mockResolvedValueOnce(notJson(500)).mockResolvedValueOnce(ok(batch(0, 3)));
+    await expect(fetchTop()).rejects.toMatchObject({ status: 500 });
     expect((await fetchTop()).articles).toHaveLength(3);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -720,8 +766,8 @@ describe("getArticleById — when the cache cannot answer", () => {
     jest
       .spyOn(global, "fetch")
       .mockResolvedValueOnce(fail(404, { message: "merged into evt_new" }))
-      .mockResolvedValueOnce(notJson(503));
-    await expect(nm.getArticleById("", "evt_old")).rejects.toMatchObject({ status: 503 });
+      .mockResolvedValueOnce(notJson(500));
+    await expect(nm.getArticleById("", "evt_old")).rejects.toMatchObject({ status: 500 });
   });
 
   test("an event with nothing to read is null", async () => {
