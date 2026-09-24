@@ -652,3 +652,55 @@ describe("when YouTube leaves optional fields out", () => {
     expect(video[0].itag).toBe(2);
   });
 });
+
+describe("one resolve per video at a time", () => {
+  const deferred = () => {
+    let resolve;
+    const promise = new Promise((r) => (resolve = r));
+    return { promise, resolve };
+  };
+
+  test("requests for a video already being resolved join that resolve", async () => {
+    const d = deferred();
+    const fetchImpl = jest.fn(async (url) => (String(url).includes("/watch?") ? html(WATCH_HTML) : d.promise));
+    const a = yt.resolveVideo("dQw4w9WgXcQ", { fetchImpl });
+    const b = yt.resolveVideo("dQw4w9WgXcQ", { fetchImpl });
+    const c = yt.resolveVideo("dQw4w9WgXcQ", { fetchImpl });
+    await new Promise((r) => setImmediate(r));
+    d.resolve(json(playerOk()));
+    const [ra, rb, rc] = await Promise.all([a, b, c]);
+    expect(ra).toBe(rb);
+    expect(rb).toBe(rc);
+    const playerCalls = fetchImpl.mock.calls.filter((call) => !String(call[0]).includes("/watch?"));
+    expect(playerCalls).toHaveLength(1);
+  });
+
+  test("a refusal reaches every request that joined, from one call to YouTube", async () => {
+    const d = deferred();
+    const fetchImpl = jest.fn(async (url) => (String(url).includes("/watch?") ? html(WATCH_HTML) : d.promise));
+    const a = yt.resolveVideo("dQw4w9WgXcQ", { fetchImpl });
+    const b = yt.resolveVideo("dQw4w9WgXcQ", { fetchImpl });
+    await new Promise((r) => setImmediate(r));
+    d.resolve(json({ playabilityStatus: { status: "LOGIN_REQUIRED", reason: "Sign in to confirm you’re not a bot" } }));
+    await expect(a).rejects.toMatchObject({ status: 403 });
+    await expect(b).rejects.toMatchObject({ status: 403 });
+    expect(fetchImpl.mock.calls.filter((call) => !String(call[0]).includes("/watch?"))).toHaveLength(1);
+  });
+
+  test("a failure is not remembered: the next request asks YouTube again", async () => {
+    const fetchImpl = jest
+      .fn()
+      .mockResolvedValueOnce(html(WATCH_HTML))
+      .mockResolvedValueOnce(json({ playabilityStatus: { status: "LOGIN_REQUIRED" } }))
+      .mockResolvedValueOnce(json(playerOk()));
+    await expect(yt.resolveVideo("dQw4w9WgXcQ", { fetchImpl })).rejects.toMatchObject({ status: 403 });
+    const resolved = await yt.resolveVideo("dQw4w9WgXcQ", { fetchImpl });
+    expect(resolved.bestQuality).toBe("1080p");
+  });
+
+  test("different videos resolve independently", async () => {
+    const fetchImpl = jest.fn(async (url) => (String(url).includes("/watch?") ? html(WATCH_HTML) : json(playerOk())));
+    await Promise.all([yt.resolveVideo("dQw4w9WgXcQ", { fetchImpl }), yt.resolveVideo("jNQXAC9IVRw", { fetchImpl })]);
+    expect(fetchImpl.mock.calls.filter((call) => !String(call[0]).includes("/watch?"))).toHaveLength(2);
+  });
+});

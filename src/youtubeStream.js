@@ -323,6 +323,17 @@ const cacheKey = (videoId) => `youtube::media::${videoId}`;
  * Cached until shortly before the URLs' own expiry, so pressing play on the
  * same story twice does not re-scrape anything.
  */
+/**
+ * One resolve per video at a time. A request for a video already being
+ * resolved joins that resolve rather than starting another: production's
+ * logs showed one refused video resolved about 40 times in 90 seconds, as
+ * Nuvio's retries and player-engine switches each asked again -- every one a
+ * fresh request to YouTube from an IP it was already refusing, which is the
+ * pattern that keeps an IP refused. The entry is dropped when the resolve
+ * settles, so a failure is not remembered: the next request tries afresh.
+ */
+const inflight = new Map();
+
 async function resolveVideo(videoId, { fetchImpl = fetch } = {}) {
   if (typeof videoId !== "string" || !VIDEO_ID_RE.test(videoId)) {
     throw fail("Not a YouTube video id", 400);
@@ -331,6 +342,15 @@ async function resolveVideo(videoId, { fetchImpl = fetch } = {}) {
   const cached = catalogCache.get(cacheKey(videoId));
   if (cached) return cached;
 
+  let job = inflight.get(videoId);
+  if (!job) {
+    job = resolveFresh(videoId, fetchImpl).finally(() => inflight.delete(videoId));
+    inflight.set(videoId, job);
+  }
+  return job;
+}
+
+async function resolveFresh(videoId, fetchImpl) {
   const config = await getWatchConfig(fetchImpl);
   const player = await fetchPlayerResponse(videoId, config, fetchImpl);
 
