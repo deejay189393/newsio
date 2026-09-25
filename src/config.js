@@ -27,7 +27,9 @@ function encodeConfig(config) {
       // Stored compactly: a preset is its id, a custom topic is { q }.
       topics: toStoredTopics(normalized.topics),
       language: normalized.language,
-      youtubeStreams: normalized.youtubeStreams
+      youtubeStreams: normalized.youtubeStreams,
+      // On unless switched off, so it is stored only when it is off.
+      ...(normalized.youtubeNews ? {} : { youtubeNews: false })
     })
   );
 }
@@ -48,8 +50,19 @@ function normalizeConfig(config) {
     youtubeStreams: normalizeYoutubeStreams(
       config && config.youtubeStreams,
       config && config.youtubePlayback
-    )
+    ),
+    youtubeNews: youtubeNewsEnabled(config)
   };
+}
+
+/**
+ * Whether YouTube searches stay on news: "news" added to the user's own
+ * topics and searches, newest first. Only an explicit false turns it off,
+ * so every addon installed before the setting existed keeps the behaviour
+ * it was installed with.
+ */
+function youtubeNewsEnabled(config) {
+  return !(config && config.youtubeNews === false);
 }
 
 
@@ -132,6 +145,7 @@ module.exports = {
   encodeConfig,
   decodeConfig,
   normalizeSources,
+  youtubeNewsEnabled,
   isConfigured,
   unusedProviders
 };

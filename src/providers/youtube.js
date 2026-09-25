@@ -192,7 +192,7 @@ function normalize(item, detail) {
  * arithmetic every provider's pagination depends on, so the page keeps its
  * 50 entries and the unwanted ones are simply marked.
  */
-function exclusionReason(article, wantedLanguage) {
+function exclusionReason(article, wantedLanguage, { minViews = MIN_VIEW_COUNT } = {}) {
   if (!article.embeddable) return "not embeddable";
   if (article.liveBroadcast === "upcoming") return "not broadcast yet";
   // An unset language is left alone: absent is not wrong, and the major
@@ -209,7 +209,7 @@ function exclusionReason(article, wantedLanguage) {
   ) {
     return `${article.language} audio`;
   }
-  if (article.viewCount !== null && article.viewCount < MIN_VIEW_COUNT) return "too few views";
+  if (article.viewCount !== null && article.viewCount < minViews) return "too few views";
   return null;
 }
 
@@ -274,7 +274,7 @@ async function enrich(apiKey, items) {
 
 const key = (queryKey, i) => `youtube::${queryKey}::${i}`;
 
-async function fetchPage({ apiKey, topic, query, language, skip }) {
+async function fetchPage({ apiKey, topic, query, language, skip, youtubeNews = true }) {
   if (!apiKey) {
     const err = new Error("Missing YouTube API key");
     err.status = 401;
@@ -291,10 +291,18 @@ async function fetchPage({ apiKey, topic, query, language, skip }) {
   // A user's own topic and the search box go in as typed, with "news" added
   // and the category dropped: measured, videoCategoryId=25 strangles a
   // narrow query, and the word does the constraining instead.
-  const q = query ? `${query} news` : terms;
+  //
+  // Unless the reader has switched news off, to use YouTube as a general
+  // catalog. Then the query is searched as typed and ranked the way YouTube
+  // ranks it: most relevant first, any length, no view floor. The news
+  // tuning below exists to keep out junk bulletins, and for a film or a
+  // series it would keep out the trailer and the full episodes instead.
+  // The preset topics are news subjects by definition and stay as they are.
+  const plain = Boolean(query) && youtubeNews === false;
+  const q = query ? (plain ? query : `${query} news`) : terms;
   const category = query ? undefined : NEWS_CATEGORY;
   const wantedLanguage = primaryLanguage(language);
-  const queryKey = JSON.stringify({ q, category: category || null, language });
+  const queryKey = JSON.stringify({ q, category: category || null, language, plain });
 
   const loadPage = async (index) => {
     const cached = catalogCache.get(key(queryKey, index));
@@ -320,13 +328,13 @@ async function fetchPage({ apiKey, topic, query, language, skip }) {
         type: "video",
         q,
         maxResults: UPSTREAM_PAGE_SIZE,
-        // Freshest first: this is a news catalog, and relevance ranking
-        // returns evergreen explainers months old.
-        order: "date",
+        // Freshest first for news, where relevance ranking returns
+        // evergreen explainers months old.
+        order: plain ? "relevance" : "date",
         videoCategoryId: category,
-        // Excludes anything under four minutes, which is where the Shorts
-        // and the hashtag-spam clips live.
-        videoDuration: "medium",
+        // For news, excludes anything under four minutes, which is where
+        // the Shorts and the hashtag-spam clips live.
+        videoDuration: plain ? undefined : "medium",
         videoEmbeddable: "true",
         relevanceLanguage: language,
         regionCode: REGIONS[wantedLanguage],
@@ -337,7 +345,7 @@ async function fetchPage({ apiKey, topic, query, language, skip }) {
       const details = await enrich(apiKey, items);
       const articles = items.map((item) => {
         const article = normalize(item, details.get(item.id && item.id.videoId));
-        const reason = exclusionReason(article, wantedLanguage);
+        const reason = exclusionReason(article, wantedLanguage, { minViews: plain ? 0 : MIN_VIEW_COUNT });
         if (reason) article.excluded = reason;
         return article;
       });

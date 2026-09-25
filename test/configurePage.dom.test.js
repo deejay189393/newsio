@@ -175,7 +175,8 @@ describe("configure page — Generate install link", () => {
         { kind: "preset", id: "world", label: "World" }
       ],
       language: "en",
-      youtubeStreams: ["app", "youtube"]
+      youtubeStreams: ["app", "youtube"],
+      youtubeNews: true
     });
   });
 
@@ -981,5 +982,52 @@ describe("choosing and ordering the YouTube stream options", () => {
     rowFor(page, "smarttube").querySelector(".yt-up").click();
     rowFor(page, "app").querySelector(".yt-down").click();
     expect(page.errors).toEqual([]);
+  });
+});
+
+describe("configure page — keeping YouTube searches to news", () => {
+  const rawConfig = (page) => {
+    const url = page.document.getElementById("manifest-url").value;
+    return JSON.parse(decodeURIComponent(url.slice(BASE.length + 1, -"/manifest.json".length)));
+  };
+  const fill = (page) => {
+    page.setKey("youtube", "AIza-key");
+    page.check("top");
+  };
+  const newsBox = (page) => page.document.getElementById("yt-news");
+
+  test("left on, it adds nothing to the URL, and the addon reads it as on", () => {
+    const page = loadPage();
+    expect(newsBox(page).checked).toBe(true);
+    fill(page);
+    page.submit();
+    expect(rawConfig(page)).not.toHaveProperty("youtubeNews");
+    expect(decodeConfig(encodeURIComponent(JSON.stringify(rawConfig(page)))).youtubeNews).toBe(true);
+  });
+
+  test("switched off, the URL carries youtubeNews: false", () => {
+    const page = loadPage();
+    newsBox(page).checked = false;
+    fill(page);
+    page.submit();
+    expect(rawConfig(page).youtubeNews).toBe(false);
+    expect(decodeConfig(encodeURIComponent(JSON.stringify(rawConfig(page)))).youtubeNews).toBe(false);
+  });
+
+  test("reconfiguring keeps it off, and ticking it again takes it out of the URL", () => {
+    const existing = {
+      sources: [{ provider: "youtube", apiKey: "AIza-key" }],
+      topics: ["top"],
+      language: "en",
+      youtubeNews: false
+    };
+    const page = loadPage({ existing });
+    expect(newsBox(page).checked).toBe(false);
+    page.submit();
+    expect(rawConfig(page).youtubeNews).toBe(false);
+
+    newsBox(page).checked = true;
+    page.submit();
+    expect(rawConfig(page)).not.toHaveProperty("youtubeNews");
   });
 });

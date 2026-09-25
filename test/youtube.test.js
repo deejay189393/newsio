@@ -573,3 +573,105 @@ describe("what the provider advertises about itself", () => {
     youtube.languages.forEach((code) => expect(youtube.REGIONS[code]).toMatch(/^[A-Z]{2}$/));
   });
 });
+
+describe("with news switched off, for a general YouTube catalog", () => {
+  test("a search goes in as typed, most relevant first, any length", async () => {
+    const spy = mockFetch(mockPage(["aaaaaaaaaaa"]));
+    await youtube.fetchPage({ apiKey: "k", query: "slow horses", language: "en", skip: 0, youtubeNews: false });
+
+    const p = paramsOf(spy, 0);
+    expect(p.q).toBe("slow horses");
+    expect(p.order).toBe("relevance");
+    expect(p.videoDuration).toBeUndefined();
+    expect(p.videoCategoryId).toBeUndefined();
+    // What keeps a result playable and in the reader's language stays.
+    expect(p.videoEmbeddable).toBe("true");
+    expect(p.relevanceLanguage).toBe("en");
+    expect(p.regionCode).toBe("US");
+  });
+
+  test("news stays on unless it is switched off explicitly", async () => {
+    const spy = mockFetch(mockPage(["aaaaaaaaaaa"]));
+    await youtube.fetchPage({ apiKey: "k", query: "slow horses", language: "en", skip: 0 });
+
+    const p = paramsOf(spy, 0);
+    expect(p.q).toBe("slow horses news");
+    expect(p.order).toBe("date");
+    expect(p.videoDuration).toBe("medium");
+
+    // Saying so explicitly is the same search, served from the same cache.
+    await youtube.fetchPage({ apiKey: "k", query: "slow horses", language: "en", skip: 0, youtubeNews: true });
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  test("a video with few views is kept: the floor is there for junk bulletins", async () => {
+    const quiet = [detail("aaaaaaaaaaa", { statistics: { viewCount: "12" } })];
+    mockFetch(mockPage(["aaaaaaaaaaa"], { details: quiet }));
+    const page = await youtube.fetchPage({ apiKey: "k", query: "home video", language: "en", skip: 0, youtubeNews: false });
+    expect(page.articles[0].excluded).toBeUndefined();
+    expect(articleCache.get(page.articles[0].id)).toBeDefined();
+  });
+
+  test("the same few views are still dropped from a news search", async () => {
+    const quiet = [detail("aaaaaaaaaaa", { statistics: { viewCount: "12" } })];
+    mockFetch(mockPage(["aaaaaaaaaaa"], { details: quiet }));
+    const page = await youtube.fetchPage({ apiKey: "k", query: "home video", language: "en", skip: 0 });
+    expect(page.articles).toEqual([]);
+  });
+
+  test("what keeps a video playable and in the right language still applies", async () => {
+    const details = [
+      detail("aaaaaaaaaaa", { status: { embeddable: false } }),
+      detail("bbbbbbbbbbb", { snippet: { defaultAudioLanguage: "de" } }),
+      detail("ccccccccccc", { snippet: { liveBroadcastContent: "upcoming" } })
+    ];
+    mockFetch(mockPage(["aaaaaaaaaaa", "bbbbbbbbbbb", "ccccccccccc"], { details }));
+    const page = await youtube.fetchPage({ apiKey: "k", query: "anything", language: "en", skip: 0, youtubeNews: false });
+    expect(page.articles).toEqual([]);
+    expect(articleCache.size).toBe(0);
+  });
+
+  test("a preset topic stays a news catalog either way", async () => {
+    const spy = mockFetch(mockPage(["aaaaaaaaaaa"]));
+    await youtube.fetchPage({ apiKey: "k", topic: "sports", language: "en", skip: 0, youtubeNews: false });
+
+    const p = paramsOf(spy, 0);
+    expect(p.q).toBe("sports news");
+    expect(p.videoCategoryId).toBe("25");
+    expect(p.order).toBe("date");
+    expect(p.videoDuration).toBe("medium");
+  });
+
+  test("a preset topic shares its cache whichever way news is set", async () => {
+    const spy = mockFetch(mockPage(["aaaaaaaaaaa"]));
+    await youtube.fetchPage({ apiKey: "k", topic: "sports", language: "en", skip: 0 });
+    await youtube.fetchPage({ apiKey: "k", topic: "sports", language: "en", skip: 0, youtubeNews: false });
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  test("the news and plain forms of one search are cached apart", async () => {
+    const spy = mockFetch(mockPage(["aaaaaaaaaaa"]), mockPage(["bbbbbbbbbbb"]));
+    const news = await youtube.fetchPage({ apiKey: "k", query: "slow horses", language: "en", skip: 0 });
+    const plain = await youtube.fetchPage({ apiKey: "k", query: "slow horses", language: "en", skip: 0, youtubeNews: false });
+    expect(spy).toHaveBeenCalledTimes(4);
+    expect(news.articles[0].id).not.toBe(plain.articles[0].id);
+  });
+
+  test("a plain search typed with \"news\" in it is not the news search", async () => {
+    // "x news" searched as typed is ranked by relevance at any length; the
+    // news search for "x" is newest first. The same q, cached apart.
+    const spy = mockFetch(mockPage(["aaaaaaaaaaa"]), mockPage(["bbbbbbbbbbb"]));
+    await youtube.fetchPage({ apiKey: "k", query: "slow horses", language: "en", skip: 0 });
+    await youtube.fetchPage({ apiKey: "k", query: "slow horses news", language: "en", skip: 0, youtubeNews: false });
+    expect(paramsOf(spy, 0).q).toBe(paramsOf(spy, 2).q);
+    expect(paramsOf(spy, 2).order).toBe("relevance");
+    expect(spy).toHaveBeenCalledTimes(4);
+  });
+
+  test("the view floor can be lowered, and defaults to the news floor", () => {
+    const quiet = { embeddable: true, liveBroadcast: "none", language: "en", viewCount: 12 };
+    expect(youtube.exclusionReason(quiet, "en")).toBe("too few views");
+    expect(youtube.exclusionReason(quiet, "en", {})).toBe("too few views");
+    expect(youtube.exclusionReason(quiet, "en", { minViews: 0 })).toBeNull();
+  });
+});

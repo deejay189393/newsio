@@ -2,6 +2,7 @@ const { LANGUAGES, PROVIDERS } = require("./providers");
 const { DESCRIPTION } = require("./manifest");
 const { PRESET_TOPICS, normalizeTopics, MAX_CUSTOM_TOPICS, MAX_QUERY_LENGTH } = require("./topics");
 const { normalizeYoutubeStreams, orderedYoutubeOptions } = require("./youtubeStreams");
+const { youtubeNewsEnabled } = require("./config");
 
 /** Where the addon's source lives, linked from the footer. */
 const REPO_URL = "https://github.com/deejay189393/newsio";
@@ -96,6 +97,24 @@ function youtubeStreamsField(chosen) {
 }
 
 
+/**
+ * Whether YouTube searches stay on news. On by default; off turns the
+ * user's own topics and the search box into plain YouTube searches, for
+ * anyone using the addon as a general YouTube catalog.
+ */
+function youtubeNewsField(enabled) {
+  return `
+        <div class="field source-option">
+          <label class="yt-option-check">
+            <input type="checkbox" id="yt-news"${enabled ? " checked" : ""} />
+            <span>
+              <strong>Keep searches to news</strong>
+              <em>Adds &ldquo;news&rdquo; to your own catalogs and to search, newest first. Turn off to use YouTube as a general catalog: searched as typed, most relevant first, any length. The built-in topics stay news either way.</em>
+            </span>
+          </label>
+        </div>`;
+}
+
 /** Providers that work with no key, named for the page's copy. */
 const keylessLabels = PROVIDERS.filter((p) => p.keyOptional)
   .map((p) => p.label)
@@ -117,6 +136,7 @@ function renderConfigurePage({ baseUrl, existing }) {
     existing && existing.youtubeStreams,
     existing && existing.youtubePlayback
   );
+  const youtubeNews = youtubeNewsEnabled(existing);
 
   const sourceCards = orderedProviders(existing)
     .map((provider) => {
@@ -155,7 +175,7 @@ function renderConfigurePage({ baseUrl, existing }) {
         <div class="key-row">
           <input type="password" class="source-key" placeholder="${escapeHtml(provider.keyPlaceholder)}" value="${escapeHtml(key)}" aria-label="${escapeHtml(provider.label)} key" />
           <button type="button" class="key-toggle" title="Show key" aria-label="Show ${escapeHtml(provider.label)} key" aria-pressed="false"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M2 12s4-6 10-6 10 6 10 6-4 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.5"/><line class="eye-slash" x1="3.5" y1="20.5" x2="20.5" y2="3.5"/></svg></button>
-        </div>${provider.id === "youtube" ? youtubeStreamsField(youtubeStreams) : ""}
+        </div>${provider.id === "youtube" ? youtubeNewsField(youtubeNews) + youtubeStreamsField(youtubeStreams) : ""}
         <div class="source-links"><a href="${escapeHtml(provider.signupUrl)}" target="_blank" rel="noopener">${linkText}</a></div>
       </div>`;
     })
@@ -694,6 +714,8 @@ function renderConfigurePage({ baseUrl, existing }) {
     var youtubeStreams = ytOptionRows()
       .filter(function (row) { return row.querySelector(".yt-option-on").checked; })
       .map(function (row) { return row.getAttribute("data-option"); });
+    // On unless switched off, so it only goes in the URL when it is off.
+    var ytNews = document.getElementById("yt-news");
     // Order matters: it is the order the catalogs appear in Stremio.
     var topics = TOPICS.map(function (t) {
       return t.kind === "preset" ? t.id : { q: t.query };
@@ -715,14 +737,14 @@ function renderConfigurePage({ baseUrl, existing }) {
 
     // Matches stremio-addon-sdk's own config convention exactly:
     // one path segment of encodeURIComponent(JSON.stringify(config)).
-    var configSegment = encodeURIComponent(
-      JSON.stringify({
-        sources: sources,
-        topics: topics,
-        language: language,
-        youtubeStreams: youtubeStreams
-      })
-    );
+    var config = {
+      sources: sources,
+      topics: topics,
+      language: language,
+      youtubeStreams: youtubeStreams
+    };
+    if (ytNews && !ytNews.checked) config.youtubeNews = false;
+    var configSegment = encodeURIComponent(JSON.stringify(config));
     var base = BASE_URL;
     while (base.length && base.charAt(base.length - 1) === "/") base = base.slice(0, -1);
     var httpUrl = base + "/" + configSegment + "/manifest.json";

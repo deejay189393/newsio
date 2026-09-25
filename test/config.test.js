@@ -1,4 +1,4 @@
-const { encodeConfig, decodeConfig, normalizeSources, isConfigured, unusedProviders } = require("../src/config");
+const { encodeConfig, decodeConfig, normalizeSources, isConfigured, unusedProviders, youtubeNewsEnabled } = require("../src/config");
 
 const CUR = { provider: "currents", apiKey: "cur-key" };
 const ND = { provider: "newsdata", apiKey: "nd-key" };
@@ -73,7 +73,8 @@ describe("encode / decode round trip", () => {
         { kind: "preset", id: "top", label: "Top Stories" }
       ],
       language: "fr",
-      youtubeStreams: ["app", "youtube"]
+      youtubeStreams: ["app", "youtube"],
+      youtubeNews: true
     });
   });
 
@@ -102,7 +103,8 @@ describe("encode / decode round trip", () => {
       sources: [{ provider: "currents", apiKey: "100%" }],
       topics: [{ kind: "preset", id: "top", label: "Top Stories" }],
       language: "en",
-      youtubeStreams: ["app", "youtube"]
+      youtubeStreams: ["app", "youtube"],
+      youtubeNews: true
     });
   });
 
@@ -111,7 +113,8 @@ describe("encode / decode round trip", () => {
       sources: [],
       topics: [],
       language: "en",
-      youtubeStreams: ["app", "youtube"]
+      youtubeStreams: ["app", "youtube"],
+      youtubeNews: true
     });
   });
 });
@@ -262,5 +265,46 @@ describe("keys are never persisted", () => {
     const encoded = encodeConfig({ sources: [CUR, ND], topics: ["top"], language: "en" });
     const decoded = JSON.parse(decodeURIComponent(encoded));
     expect(decoded.sources.map((s) => s.apiKey)).toEqual(["cur-key", "nd-key"]);
+  });
+});
+
+describe("keeping YouTube searches to news", () => {
+  const YT = { provider: "youtube", apiKey: "AIza-key" };
+
+  test("is on for every addon installed before the setting existed", () => {
+    expect(decodeConfig(JSON.stringify({ sources: [YT], topics: ["top"] })).youtubeNews).toBe(true);
+    expect(youtubeNewsEnabled({ sources: [YT] })).toBe(true);
+  });
+
+  test("is on for no config at all", () => {
+    expect(youtubeNewsEnabled(undefined)).toBe(true);
+    expect(youtubeNewsEnabled(null)).toBe(true);
+  });
+
+  test("only an explicit false turns it off", () => {
+    expect(youtubeNewsEnabled({ youtubeNews: false })).toBe(false);
+    expect(youtubeNewsEnabled({ youtubeNews: true })).toBe(true);
+    // A hand-edited URL with something else in it keeps the default.
+    for (const value of ["false", 0, null, "", "no"]) {
+      expect(youtubeNewsEnabled({ youtubeNews: value })).toBe(true);
+    }
+  });
+
+  test("decoding keeps it off when the URL says so", () => {
+    const back = decodeConfig(JSON.stringify({ sources: [YT], topics: ["top"], youtubeNews: false }));
+    expect(back.youtubeNews).toBe(false);
+  });
+
+  test("is left out of the URL while it is on, so existing URLs do not change", () => {
+    const encoded = decodeURIComponent(encodeConfig({ sources: [YT], topics: ["top"] }));
+    expect(JSON.parse(encoded)).not.toHaveProperty("youtubeNews");
+    const explicit = decodeURIComponent(encodeConfig({ sources: [YT], topics: ["top"], youtubeNews: true }));
+    expect(JSON.parse(explicit)).not.toHaveProperty("youtubeNews");
+  });
+
+  test("is written into the URL as false when it is off, and survives the round trip", () => {
+    const encoded = encodeConfig({ sources: [YT], topics: ["top"], youtubeNews: false });
+    expect(JSON.parse(decodeURIComponent(encoded)).youtubeNews).toBe(false);
+    expect(decodeConfig(encoded).youtubeNews).toBe(false);
   });
 });
