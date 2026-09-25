@@ -436,3 +436,39 @@ describe("keeping YouTube searches to news, on the page", () => {
     expect(card).toContain("The built-in topics stay news either way.");
   });
 });
+
+describe("the Options card", () => {
+  const render = (existing) => renderConfigurePage({ baseUrl: BASE, existing });
+  const input = (markup) => markup.match(/<input type="number" id="max-age"[^>]*>/)[0];
+
+  test("sits after the catalogs, under its own heading", () => {
+    const markup = render(null);
+    expect(markup).toContain("<h2>Options</h2>");
+    expect(markup.indexOf("<h2>Options</h2>")).toBeGreaterThan(markup.indexOf("<h2>Your catalogs</h2>"));
+    expect(markup.indexOf("<h2>Options</h2>")).toBeLessThan(markup.indexOf('id="submit-btn"'));
+  });
+
+  test("offers a whole-number field starting at 0 with no upper limit", () => {
+    const field = input(render(null));
+    expect(field).toContain('min="0"');
+    expect(field).toContain('step="1"');
+    expect(field).not.toContain("max=");
+  });
+
+  test("starts at 30 for a new setup and for one that never set it", () => {
+    expect(input(render(null))).toContain('value="30"');
+    expect(input(render({ sources: [], topics: [], language: "en" }))).toContain('value="30"');
+  });
+
+  test("shows back a saved value, 0 included", () => {
+    expect(input(render({ sources: [], topics: [], language: "en", maxAgeDays: 7 }))).toContain('value="7"');
+    expect(input(render({ sources: [], topics: [], language: "en", maxAgeDays: 0 }))).toContain('value="0"');
+  });
+
+  test("explains what it covers and what 0 means", () => {
+    const markup = render(null);
+    expect(markup).toContain("Only show stories from the last &hellip; days");
+    expect(markup).toContain("every catalog and of search, whichever source it came from");
+    expect(markup).toContain("0 shows only the last 24 hours");
+  });
+});

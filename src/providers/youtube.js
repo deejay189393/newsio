@@ -1,4 +1,4 @@
-const { realText, makeArticleId, assembleCatalogPage, CATALOG_PAGE_SIZE } = require("../articles");
+const { realText, makeArticleId, assembleCatalogPage, maxAgeCutoff, CATALOG_PAGE_SIZE } = require("../articles");
 const { catalogCache, articleCache, pageCursorCache } = require("../cache");
 
 const BASE_URL = "https://www.googleapis.com/youtube/v3";
@@ -274,7 +274,25 @@ async function enrich(apiKey, items) {
 
 const key = (queryKey, i) => `youtube::${queryKey}::${i}`;
 
-async function fetchPage({ apiKey, topic, query, language, skip, youtubeNews = true }) {
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * The reader's age limit, sent to YouTube as `publishedAfter` so the fifty
+ * results a search costs are fifty that can be shown. It matters most for a
+ * plain search ranked by relevance, where the best matches are often years
+ * old and filtering afterwards would leave the page nearly empty.
+ *
+ * Rounded down to the hour: a cached page is kept for an hour, and a cutoff
+ * that moved every millisecond would give every request its own cache key.
+ * The hour of slack is taken back by the exact filter every source gets.
+ */
+function publishedAfter(maxAgeDays, now = Date.now()) {
+  if (!Number.isSafeInteger(maxAgeDays) || maxAgeDays < 0) return undefined;
+  const cutoff = maxAgeCutoff(maxAgeDays, now);
+  return new Date(Math.floor(cutoff / HOUR_MS) * HOUR_MS).toISOString();
+}
+
+async function fetchPage({ apiKey, topic, query, language, skip, youtubeNews = true, maxAgeDays }) {
   if (!apiKey) {
     const err = new Error("Missing YouTube API key");
     err.status = 401;
@@ -302,7 +320,8 @@ async function fetchPage({ apiKey, topic, query, language, skip, youtubeNews = t
   const q = query ? (plain ? query : `${query} news`) : terms;
   const category = query ? undefined : NEWS_CATEGORY;
   const wantedLanguage = primaryLanguage(language);
-  const queryKey = JSON.stringify({ q, category: category || null, language, plain });
+  const after = publishedAfter(maxAgeDays);
+  const queryKey = JSON.stringify({ q, category: category || null, language, plain, after: after || null });
 
   const loadPage = async (index) => {
     const cached = catalogCache.get(key(queryKey, index));
@@ -338,6 +357,7 @@ async function fetchPage({ apiKey, topic, query, language, skip, youtubeNews = t
         videoEmbeddable: "true",
         relevanceLanguage: language,
         regionCode: REGIONS[wantedLanguage],
+        publishedAfter: after,
         pageToken: token || undefined
       });
 
@@ -394,6 +414,7 @@ module.exports = {
   getArticleById,
   normalize,
   exclusionReason,
+  publishedAfter,
   durationToSeconds,
   formatDuration,
   bestThumbnail,

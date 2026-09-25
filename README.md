@@ -253,6 +253,7 @@ using the SDK's native convention:
 ```js
 encodeURIComponent(JSON.stringify({ sources, topics, language, youtubeStreams }))
 // plus "youtubeNews": false, only when YouTube searches are not kept to news
+// plus "maxAgeDays": n, only when it is not the default 30
 
 // sources is ordered — the order is the failover chain:
 [{ provider: "currents", apiKey: "…" }, { provider: "newsdata", apiKey: "…" }]
@@ -263,6 +264,23 @@ into the same quota.
 
 The deployment holds no database and no secrets. The flip side: **your install
 URL contains every API key you entered, so don't share it publicly.**
+
+## How far back stories go
+
+The **Options** card sets how many days back a story may be and still be
+shown: a whole number from 0 up, default **30**, no upper limit. It applies to
+every catalog and to search, whichever source served the story.
+
+Days count back from now rather than by calendar date, because the server
+cannot know your time zone: **0 is the last 24 hours**, 1 the last 48, 30 the
+last 31 days. A story that carries no date is kept, since nothing says it is
+old. A source whose first page has nothing recent enough counts as empty and
+yields to the next source, like any empty one.
+
+YouTube is also asked for the window up front (`publishedAfter`, rounded down
+to the hour so cached pages stay reusable), so the 50 results a search costs
+are 50 that can be shown — which matters most for plain searches ranked by
+relevance, whose best matches are often years old.
 
 ## Topics and catalog order
 

@@ -176,7 +176,8 @@ describe("configure page — Generate install link", () => {
       ],
       language: "en",
       youtubeStreams: ["app", "youtube"],
-      youtubeNews: true
+      youtubeNews: true,
+      maxAgeDays: 30
     });
   });
 
@@ -1029,5 +1030,57 @@ describe("configure page — keeping YouTube searches to news", () => {
     newsBox(page).checked = true;
     page.submit();
     expect(rawConfig(page)).not.toHaveProperty("youtubeNews");
+  });
+});
+
+describe("configure page — how far back stories may go", () => {
+  const rawConfig = (page) => {
+    const url = page.document.getElementById("manifest-url").value;
+    return JSON.parse(decodeURIComponent(url.slice(BASE.length + 1, -"/manifest.json".length)));
+  };
+  const fill = (page) => {
+    page.setKey("currents", "cur-key");
+    page.check("top");
+  };
+  const field = (page) => page.document.getElementById("max-age");
+  const errorText = (page) => page.document.getElementById("error");
+
+  test("left at 30, it adds nothing to the URL, and the addon reads it as 30", () => {
+    const page = loadPage();
+    expect(field(page).value).toBe("30");
+    fill(page);
+    page.submit();
+    expect(rawConfig(page)).not.toHaveProperty("maxAgeDays");
+    expect(decodeConfig(encodeURIComponent(JSON.stringify(rawConfig(page)))).maxAgeDays).toBe(30);
+  });
+
+  test.each([["0", 0], ["7", 7], ["365", 365], ["100000", 100000]])(
+    "%p days goes into the URL as %p",
+    (typed, expected) => {
+      const page = loadPage();
+      fill(page);
+      field(page).value = typed;
+      page.submit();
+      expect(rawConfig(page).maxAgeDays).toBe(expected);
+      expect(decodeConfig(encodeURIComponent(JSON.stringify(rawConfig(page)))).maxAgeDays).toBe(expected);
+    }
+  );
+
+  test.each(["", "-1", "1.5", "1e3"])("%p is refused with an explanation", (typed) => {
+    const page = loadPage();
+    fill(page);
+    field(page).value = typed;
+    page.submit();
+    expect(errorText(page).style.display).not.toBe("none");
+    expect(errorText(page).textContent).toContain("a whole number, 0 or more");
+    expect(page.document.getElementById("manifest-url").value).toBe("");
+  });
+
+  test("reconfiguring shows the saved value and keeps it", () => {
+    const existing = { sources: [{ provider: "currents", apiKey: "cur-key" }], topics: ["top"], language: "en", maxAgeDays: 3 };
+    const page = loadPage({ existing });
+    expect(field(page).value).toBe("3");
+    page.submit();
+    expect(rawConfig(page).maxAgeDays).toBe(3);
   });
 });

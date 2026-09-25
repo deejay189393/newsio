@@ -2,7 +2,8 @@ const { LANGUAGES, PROVIDERS } = require("./providers");
 const { DESCRIPTION } = require("./manifest");
 const { PRESET_TOPICS, normalizeTopics, MAX_CUSTOM_TOPICS, MAX_QUERY_LENGTH } = require("./topics");
 const { normalizeYoutubeStreams, orderedYoutubeOptions } = require("./youtubeStreams");
-const { youtubeNewsEnabled } = require("./config");
+const { youtubeNewsEnabled, maxAgeDays } = require("./config");
+const { DEFAULT_MAX_AGE_DAYS } = require("./articles");
 
 /** Where the addon's source lives, linked from the footer. */
 const REPO_URL = "https://github.com/deejay189393/newsio";
@@ -137,6 +138,7 @@ function renderConfigurePage({ baseUrl, existing }) {
     existing && existing.youtubePlayback
   );
   const youtubeNews = youtubeNewsEnabled(existing);
+  const maxAge = maxAgeDays(existing);
 
   const sourceCards = orderedProviders(existing)
     .map((provider) => {
@@ -389,6 +391,18 @@ function renderConfigurePage({ baseUrl, existing }) {
       </div>
     </div>
 
+    <div class="card">
+      <h2>Options</h2>
+      <label class="field">
+        <span class="label-text">Only show stories from the last &hellip; days</span>
+        <input type="number" id="max-age" min="0" step="1" inputmode="numeric" value="${maxAge}" aria-describedby="max-age-hint" />
+      </label>
+      <div class="hint" id="max-age-hint">
+        Anything older is left out of every catalog and of search, whichever source it came from.
+        0 shows only the last 24 hours. The default is ${DEFAULT_MAX_AGE_DAYS}. There is no upper limit.
+      </div>
+    </div>
+
     <button type="submit" id="submit-btn">Generate install link</button>
     <div class="error" id="error" style="display:none"></div>
   </form>
@@ -422,6 +436,17 @@ function renderConfigurePage({ baseUrl, existing }) {
   var BASE_URL = ${jsonForScript(baseUrl)};
   var ENGLISH_ONLY = ${jsonForScript(ENGLISH_ONLY)};
   var NO_SOURCE_MESSAGE = ${jsonForScript(`Add a key for at least one news source, or turn on ${keylessLabels}.`)};
+  var DEFAULT_MAX_AGE_DAYS = ${DEFAULT_MAX_AGE_DAYS};
+
+  // Digits only: no sign, no decimal point, no exponent. A regex would be
+  // shorter, but this script has to stay backslash-free (see above).
+  function isWholeNumber(text) {
+    if (!text.length) return false;
+    for (var i = 0; i < text.length; i++) {
+      if ("0123456789".indexOf(text.charAt(i)) === -1) return false;
+    }
+    return true;
+  }
   var PRESETS = ${jsonForScript(PRESET_TOPICS)};
   var MAX_CUSTOM = ${MAX_CUSTOM_TOPICS};
   // The user's catalogs, in order. This array is the source of truth for
@@ -716,6 +741,7 @@ function renderConfigurePage({ baseUrl, existing }) {
       .map(function (row) { return row.getAttribute("data-option"); });
     // On unless switched off, so it only goes in the URL when it is off.
     var ytNews = document.getElementById("yt-news");
+    var maxAgeText = document.getElementById("max-age").value.trim();
     // Order matters: it is the order the catalogs appear in Stremio.
     var topics = TOPICS.map(function (t) {
       return t.kind === "preset" ? t.id : { q: t.query };
@@ -734,6 +760,11 @@ function renderConfigurePage({ baseUrl, existing }) {
       showError("Please add at least one catalog.");
       return;
     }
+    if (!isWholeNumber(maxAgeText)) {
+      showError("Enter how many days back to show stories from: a whole number, 0 or more.");
+      return;
+    }
+    var maxAge = parseInt(maxAgeText, 10);
 
     // Matches stremio-addon-sdk's own config convention exactly:
     // one path segment of encodeURIComponent(JSON.stringify(config)).
@@ -744,6 +775,8 @@ function renderConfigurePage({ baseUrl, existing }) {
       youtubeStreams: youtubeStreams
     };
     if (ytNews && !ytNews.checked) config.youtubeNews = false;
+    // Only a change from the default goes in the URL.
+    if (maxAge !== DEFAULT_MAX_AGE_DAYS) config.maxAgeDays = maxAge;
     var configSegment = encodeURIComponent(JSON.stringify(config));
     var base = BASE_URL;
     while (base.length && base.charAt(base.length - 1) === "/") base = base.slice(0, -1);

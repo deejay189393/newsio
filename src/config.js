@@ -1,6 +1,7 @@
 const { isValidProviderId, isKeyOptional, getProvider, VALID_LANGUAGE_CODES, PROVIDERS } = require("./providers");
 const { normalizeTopics, toStoredTopics } = require("./topics");
 const { normalizeYoutubeStreams } = require("./youtubeStreams");
+const { DEFAULT_MAX_AGE_DAYS } = require("./articles");
 
 /**
  * User configuration is carried in the URL as the first path segment,
@@ -29,7 +30,9 @@ function encodeConfig(config) {
       language: normalized.language,
       youtubeStreams: normalized.youtubeStreams,
       // On unless switched off, so it is stored only when it is off.
-      ...(normalized.youtubeNews ? {} : { youtubeNews: false })
+      ...(normalized.youtubeNews ? {} : { youtubeNews: false }),
+      // Likewise stored only when it is not the default.
+      ...(normalized.maxAgeDays === DEFAULT_MAX_AGE_DAYS ? {} : { maxAgeDays: normalized.maxAgeDays })
     })
   );
 }
@@ -51,8 +54,21 @@ function normalizeConfig(config) {
       config && config.youtubeStreams,
       config && config.youtubePlayback
     ),
-    youtubeNews: youtubeNewsEnabled(config)
+    youtubeNews: youtubeNewsEnabled(config),
+    maxAgeDays: maxAgeDays(config)
   };
+}
+
+/**
+ * How many days back a story may be and still be shown: a whole number of
+ * days, 0 or more, with no upper limit. 0 is the last 24 hours. Anything
+ * else -- missing, negative, fractional, not a number -- is the default,
+ * so a hand-edited URL cannot turn every catalog empty by accident.
+ */
+function maxAgeDays(config) {
+  const raw = config && config.maxAgeDays;
+  const value = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw;
+  return Number.isSafeInteger(value) && value >= 0 ? value : DEFAULT_MAX_AGE_DAYS;
 }
 
 /**
@@ -146,6 +162,7 @@ module.exports = {
   decodeConfig,
   normalizeSources,
   youtubeNewsEnabled,
+  maxAgeDays,
   isConfigured,
   unusedProviders
 };

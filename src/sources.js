@@ -1,4 +1,5 @@
 const { articleCache, sourceCooldownCache } = require("./cache");
+const { isWithinMaxAge, DEFAULT_MAX_AGE_DAYS } = require("./articles");
 const {
   getProvider,
   isKeyOptional,
@@ -81,7 +82,11 @@ function usableSources(sources, { topic, query, language }) {
  * failing over would splice a second source's page 1 onto another's page 3,
  * repeating stories the reader has already scrolled past.
  */
-async function fetchCatalogPage(sources, { topic, query, language, skip = 0, youtubeNews = true }) {
+async function fetchCatalogPage(
+  sources,
+  { topic, query, language, skip = 0, youtubeNews = true, maxAgeDays = DEFAULT_MAX_AGE_DAYS }
+) {
+  const now = Date.now();
   const candidates = usableSources(sources, { topic, query, language });
   const attempts = [];
 
@@ -93,8 +98,13 @@ async function fetchCatalogPage(sources, { topic, query, language, skip = 0, you
         query,
         language,
         skip,
-        youtubeNews
+        youtubeNews,
+        maxAgeDays
       });
+      // The reader's age limit, applied to every source alike. Before the
+      // empty check on purpose: a source whose first page is all too old
+      // has nothing to show, and yields to the next like any empty one.
+      page.articles = page.articles.filter((article) => isWithinMaxAge(article, maxAgeDays, now));
 
       if (skip === 0 && page.articles.length === 0 && !page.truncated) {
         attempts.push({ provider: provider.id, outcome: "empty" });

@@ -135,7 +135,7 @@ describe("assets are actually served", () => {
   });
 
   test("a versioned asset URL still serves the file", async () => {
-    const res = await request(app).get("/logo.png?v=0.14.0");
+    const res = await request(app).get("/logo.png?v=0.15.0");
     expect(res.status).toBe(200);
     expect(res.headers["content-type"]).toContain("image/png");
   });

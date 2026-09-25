@@ -139,6 +139,32 @@ function isLowQuality(article) {
   return COMMERCE_PHRASES.some((pattern) => pattern.test(text));
 }
 
+/** The reader's age limit when they have not set one: a month. */
+const DEFAULT_MAX_AGE_DAYS = 30;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Is a story recent enough for the reader's age limit?
+ *
+ * Days are counted back from now rather than by calendar date: the server
+ * cannot know the reader's time zone, and "today" by UTC midnight would
+ * leave an American evening with an hour of news. So 0 is the last 24
+ * hours, 1 the last 48, 30 the last 31 days.
+ *
+ * A story with no usable date is kept. Nothing says it is old, and dropping
+ * it would punish a source for leaving the field out.
+ */
+function isWithinMaxAge(article, maxAgeDays, now = Date.now()) {
+  const published = Date.parse(article && article.pubDate);
+  if (!Number.isFinite(published)) return true;
+  return now - published < (maxAgeDays + 1) * DAY_MS;
+}
+
+/** The earliest publish time a story can have and still pass `isWithinMaxAge`. */
+function maxAgeCutoff(maxAgeDays, now = Date.now()) {
+  return now - (maxAgeDays + 1) * DAY_MS;
+}
+
 /**
  * Assemble one catalog page from fixed-size upstream pages.
  *
@@ -206,6 +232,9 @@ module.exports = {
   makeArticleId,
   sourceNameFromUrl,
   isLowQuality,
+  isWithinMaxAge,
+  maxAgeCutoff,
+  DEFAULT_MAX_AGE_DAYS,
   assembleCatalogPage,
   LOW_QUALITY_SOURCE_PRIORITY
 };
