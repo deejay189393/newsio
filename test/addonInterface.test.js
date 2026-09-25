@@ -366,3 +366,45 @@ describe("keeping YouTube searches to news", () => {
     expect(firstQuery().get("q")).toBe("Slow Horses");
   });
 });
+
+describe("how far back stories may go", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const dated = (id, daysAgo) => article(id, { pubDate: new Date(Date.now() - daysAgo * DAY).toISOString() });
+  const answer = () => {
+    global.fetch = jest.fn().mockResolvedValue(
+      ok({ results: [dated("fresh", 1), dated("week", 8), dated("old", 45)], nextPage: null })
+    );
+  };
+  const ids = (res) => res.metas.map((m) => m.id);
+
+  test("a catalog shows the last 30 days by default", async () => {
+    answer();
+    const res = await iface.get("catalog", "news", "technology", {}, CONFIG);
+    expect(ids(res)).toEqual(["nd_fresh", "nd_week"]);
+  });
+
+  test("a catalog follows the configured limit", async () => {
+    answer();
+    const res = await iface.get("catalog", "news", "technology", {}, { ...CONFIG, maxAgeDays: 7 });
+    expect(ids(res)).toEqual(["nd_fresh"]);
+  });
+
+  test("search follows it too", async () => {
+    answer();
+    const res = await iface.get("catalog", "news", SEARCH_CATALOG_ID, { search: "anything" }, { ...CONFIG, maxAgeDays: 0 });
+    expect(ids(res)).toEqual([]);
+  });
+
+  test("a custom catalog follows it too", async () => {
+    answer();
+    const config = { ...CONFIG, topics: [{ q: "Arsenal" }], maxAgeDays: 100 };
+    const res = await iface.get("catalog", "news", "q_arsenal", {}, config);
+    expect(ids(res)).toEqual(["nd_fresh", "nd_week", "nd_old"]);
+  });
+
+  test("a hand-edited value that is not a whole number of days means 30", async () => {
+    answer();
+    const res = await iface.get("catalog", "news", "technology", {}, { ...CONFIG, maxAgeDays: -5 });
+    expect(ids(res)).toEqual(["nd_fresh", "nd_week"]);
+  });
+});

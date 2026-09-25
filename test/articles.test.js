@@ -353,3 +353,61 @@ describe("sourceNameFromUrl — a publisher named from its host", () => {
     expect(sourceNameFromUrl(url)).toBe("Unknown source");
   });
 });
+
+describe("the reader's age limit", () => {
+  const { isWithinMaxAge, maxAgeCutoff, DEFAULT_MAX_AGE_DAYS } = require("../src/articles");
+  const NOW = Date.parse("2026-09-25T12:00:00Z");
+  const HOUR = 60 * 60 * 1000;
+  const DAY = 24 * HOUR;
+  const at = (ms) => ({ pubDate: new Date(NOW - ms).toISOString() });
+
+  test("defaults to a month", () => {
+    expect(DEFAULT_MAX_AGE_DAYS).toBe(30);
+  });
+
+  test("0 keeps the last 24 hours and nothing older", () => {
+    expect(isWithinMaxAge(at(0), 0, NOW)).toBe(true);
+    expect(isWithinMaxAge(at(23 * HOUR), 0, NOW)).toBe(true);
+    expect(isWithinMaxAge(at(DAY - 1), 0, NOW)).toBe(true);
+    expect(isWithinMaxAge(at(DAY), 0, NOW)).toBe(false);
+  });
+
+  test("1 keeps up to 48 hours", () => {
+    expect(isWithinMaxAge(at(2 * DAY - 1), 1, NOW)).toBe(true);
+    expect(isWithinMaxAge(at(2 * DAY), 1, NOW)).toBe(false);
+  });
+
+  test("30 keeps the last 31 days", () => {
+    expect(isWithinMaxAge(at(31 * DAY - 1), 30, NOW)).toBe(true);
+    expect(isWithinMaxAge(at(31 * DAY), 30, NOW)).toBe(false);
+    expect(isWithinMaxAge(at(400 * DAY), 30, NOW)).toBe(false);
+  });
+
+  test("a large limit keeps old stories", () => {
+    expect(isWithinMaxAge(at(10 * 365 * DAY), 36500, NOW)).toBe(true);
+  });
+
+  test("a story with no usable date is kept", () => {
+    expect(isWithinMaxAge({}, 0, NOW)).toBe(true);
+    expect(isWithinMaxAge({ pubDate: null }, 0, NOW)).toBe(true);
+    expect(isWithinMaxAge({ pubDate: "not a date" }, 0, NOW)).toBe(true);
+    expect(isWithinMaxAge(null, 0, NOW)).toBe(true);
+  });
+
+  test("a date slightly in the future, from a skewed clock, is kept", () => {
+    expect(isWithinMaxAge(at(-HOUR), 0, NOW)).toBe(true);
+  });
+
+  test("uses the current time when none is given", () => {
+    expect(isWithinMaxAge({ pubDate: new Date().toISOString() }, 0)).toBe(true);
+    expect(isWithinMaxAge({ pubDate: "2000-01-01T00:00:00Z" }, 30)).toBe(false);
+  });
+
+  test("the cutoff is the oldest publish time that still passes", () => {
+    expect(maxAgeCutoff(0, NOW)).toBe(NOW - DAY);
+    expect(maxAgeCutoff(30, NOW)).toBe(NOW - 31 * DAY);
+    expect(isWithinMaxAge({ pubDate: new Date(maxAgeCutoff(7, NOW) + 1).toISOString() }, 7, NOW)).toBe(true);
+    expect(isWithinMaxAge({ pubDate: new Date(maxAgeCutoff(7, NOW)).toISOString() }, 7, NOW)).toBe(false);
+    expect(Math.abs(maxAgeCutoff(0) - (Date.now() - DAY))).toBeLessThan(1000);
+  });
+});

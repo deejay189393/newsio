@@ -675,3 +675,51 @@ describe("with news switched off, for a general YouTube catalog", () => {
     expect(youtube.exclusionReason(quiet, "en", { minViews: 0 })).toBeNull();
   });
 });
+
+describe("the reader's age limit, sent to YouTube up front", () => {
+  const NOW = Date.parse("2026-09-25T12:34:56Z");
+
+  test("becomes publishedAfter, rounded down to the hour", () => {
+    // 30 days is the last 31: 2026-08-25T12:34:56Z, rounded to 12:00.
+    expect(youtube.publishedAfter(30, NOW)).toBe("2026-08-25T12:00:00.000Z");
+    expect(youtube.publishedAfter(0, NOW)).toBe("2026-09-24T12:00:00.000Z");
+  });
+
+  test("is not sent when there is no valid limit", () => {
+    for (const bad of [undefined, null, -1, 1.5, "7"]) {
+      expect(youtube.publishedAfter(bad, NOW)).toBeUndefined();
+    }
+  });
+
+  test("goes out with the search, for a news search and a plain one alike", async () => {
+    jest.spyOn(Date, "now").mockReturnValue(NOW);
+    const spy = mockFetch(mockPage(["aaaaaaaaaaa"]), mockPage(["bbbbbbbbbbb"]));
+    await youtube.fetchPage({ apiKey: "k", topic: "world", language: "en", skip: 0, maxAgeDays: 7 });
+    await youtube.fetchPage({ apiKey: "k", query: "slow horses", language: "en", skip: 0, youtubeNews: false, maxAgeDays: 7 });
+    expect(paramsOf(spy, 0).publishedAfter).toBe("2026-09-17T12:00:00.000Z");
+    expect(paramsOf(spy, 2).publishedAfter).toBe("2026-09-17T12:00:00.000Z");
+  });
+
+  test("is left off when the caller gives no limit", async () => {
+    const spy = mockFetch(mockPage(["aaaaaaaaaaa"]));
+    await youtube.fetchPage({ apiKey: "k", topic: "world", language: "en", skip: 0 });
+    expect(paramsOf(spy, 0).publishedAfter).toBeUndefined();
+  });
+
+  test("different limits are different searches, cached apart", async () => {
+    jest.spyOn(Date, "now").mockReturnValue(NOW);
+    const spy = mockFetch(mockPage(["aaaaaaaaaaa"]), mockPage(["bbbbbbbbbbb"]));
+    await youtube.fetchPage({ apiKey: "k", topic: "world", language: "en", skip: 0, maxAgeDays: 7 });
+    await youtube.fetchPage({ apiKey: "k", topic: "world", language: "en", skip: 0, maxAgeDays: 30 });
+    expect(spy).toHaveBeenCalledTimes(4);
+  });
+
+  test("within the same hour, the same limit is served from cache", async () => {
+    const now = jest.spyOn(Date, "now").mockReturnValue(NOW);
+    const spy = mockFetch(mockPage(["aaaaaaaaaaa"]));
+    await youtube.fetchPage({ apiKey: "k", topic: "world", language: "en", skip: 0, maxAgeDays: 7 });
+    now.mockReturnValue(NOW + 10 * 60 * 1000);
+    await youtube.fetchPage({ apiKey: "k", topic: "world", language: "en", skip: 0, maxAgeDays: 7 });
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+});

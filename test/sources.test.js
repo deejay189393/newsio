@@ -197,8 +197,8 @@ describe("fetchCatalogPage — failover", () => {
 
   test("passes the topic, query, language and skip straight through", async () => {
     const c = stub(currents, async () => pageOf("cu_"));
-    await fetchCatalogPage([CUR], { topic: "sports", query: "cup", language: "fr", skip: 40, youtubeNews: true });
-    expect(c).toHaveBeenCalledWith({ apiKey: "cur-key", topic: "sports", query: "cup", language: "fr", skip: 40, youtubeNews: true });
+    await fetchCatalogPage([CUR], { topic: "sports", query: "cup", language: "fr", skip: 40, youtubeNews: true, maxAgeDays: 30 });
+    expect(c).toHaveBeenCalledWith({ apiKey: "cur-key", topic: "sports", query: "cup", language: "fr", skip: 40, youtubeNews: true, maxAgeDays: 30 });
   });
 
   test("a truncated page is a real answer, not a reason to fail over", async () => {
@@ -305,7 +305,7 @@ describe("a source that needs no key — NewsMCP", () => {
     const spy = stub(newsmcp, async () => pageOf("nm_", 20));
     const page = await fetchCatalogPage([NM, CUR], { topic: "top", language: "en" });
     expect(page.provider).toBe("newsmcp");
-    expect(spy).toHaveBeenCalledWith({ apiKey: "", topic: "top", query: undefined, language: "en", skip: 0, youtubeNews: true });
+    expect(spy).toHaveBeenCalledWith({ apiKey: "", topic: "top", query: undefined, language: "en", skip: 0, youtubeNews: true, maxAgeDays: 30 });
   });
 
   test("a German catalog never reaches it", async () => {
@@ -395,5 +395,65 @@ describe("keeping YouTube searches to news", () => {
     const c = stub(currents, async () => pageOf("cu_"));
     await fetchCatalogPage([CUR], { query: "slow horses", language: "en" });
     expect(c).toHaveBeenCalledWith(expect.objectContaining({ youtubeNews: true }));
+  });
+});
+
+describe("the reader's age limit", () => {
+  const NOW = Date.parse("2026-09-25T12:00:00Z");
+  const DAY = 24 * 60 * 60 * 1000;
+  const aged = (id, days) => ({ id, title: id, pubDate: new Date(NOW - days * DAY).toISOString() });
+  const pageWith = (...articles) => ({ articles, hasMore: true, truncated: false });
+
+  beforeEach(() => {
+    jest.spyOn(Date, "now").mockReturnValue(NOW);
+  });
+
+  test("drops what is older than the limit from any source's page", async () => {
+    stub(currents, async () => pageWith(aged("new", 1), aged("old", 45), aged("edge", 30.5)));
+    const page = await fetchCatalogPage([CUR], { topic: "technology", language: "en", maxAgeDays: 30 });
+    expect(page.articles.map((a) => a.id)).toEqual(["new", "edge"]);
+  });
+
+  test("is 30 days when the caller does not say", async () => {
+    const c = stub(currents, async () => pageWith(aged("new", 29), aged("old", 32)));
+    const page = await fetchCatalogPage([CUR], { topic: "technology", language: "en" });
+    expect(page.articles.map((a) => a.id)).toEqual(["new"]);
+    expect(c).toHaveBeenCalledWith(expect.objectContaining({ maxAgeDays: 30 }));
+  });
+
+  test("0 keeps only the last 24 hours", async () => {
+    stub(currents, async () => pageWith(aged("hours", 0.5), aged("yesterday", 1.2)));
+    const page = await fetchCatalogPage([CUR], { query: "x", language: "en", maxAgeDays: 0 });
+    expect(page.articles.map((a) => a.id)).toEqual(["hours"]);
+  });
+
+  test("keeps stories that carry no date", async () => {
+    stub(currents, async () => pageWith({ id: "undated", title: "u" }, aged("old", 90)));
+    const page = await fetchCatalogPage([CUR], { topic: "technology", language: "en", maxAgeDays: 30 });
+    expect(page.articles.map((a) => a.id)).toEqual(["undated"]);
+  });
+
+  test("tells the provider the limit, so one that can ask for it upstream does", async () => {
+    const c = stub(currents, async () => pageWith(aged("new", 1)));
+    await fetchCatalogPage([CUR], { topic: "technology", language: "en", maxAgeDays: 7 });
+    expect(c).toHaveBeenCalledWith(expect.objectContaining({ maxAgeDays: 7 }));
+  });
+
+  test("a first page with nothing recent enough fails over to the next source", async () => {
+    stub(currents, async () => pageWith(aged("stale", 60)));
+    stub(newsdata, async () => pageWith(aged("fresh", 1)));
+    const page = await fetchCatalogPage([CUR, ND], { topic: "technology", language: "en", skip: 0, maxAgeDays: 30 });
+    expect(page.provider).toBe("newsdata");
+    expect(page.articles.map((a) => a.id)).toEqual(["fresh"]);
+    expect(page.attempts).toEqual([{ provider: "currents", outcome: "empty" }]);
+  });
+
+  test("a deeper page that has run past the limit is simply the end of the feed", async () => {
+    stub(currents, async () => pageWith(aged("stale", 60)));
+    const nd = stub(newsdata, async () => pageWith(aged("fresh", 1)));
+    const page = await fetchCatalogPage([CUR, ND], { topic: "technology", language: "en", skip: 20, maxAgeDays: 30 });
+    expect(page.provider).toBe("currents");
+    expect(page.articles).toEqual([]);
+    expect(nd).not.toHaveBeenCalled();
   });
 });

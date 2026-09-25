@@ -1,4 +1,4 @@
-const { encodeConfig, decodeConfig, normalizeSources, isConfigured, unusedProviders, youtubeNewsEnabled } = require("../src/config");
+const { encodeConfig, decodeConfig, normalizeSources, isConfigured, unusedProviders, youtubeNewsEnabled, maxAgeDays } = require("../src/config");
 
 const CUR = { provider: "currents", apiKey: "cur-key" };
 const ND = { provider: "newsdata", apiKey: "nd-key" };
@@ -74,7 +74,8 @@ describe("encode / decode round trip", () => {
       ],
       language: "fr",
       youtubeStreams: ["app", "youtube"],
-      youtubeNews: true
+      youtubeNews: true,
+      maxAgeDays: 30
     });
   });
 
@@ -104,7 +105,8 @@ describe("encode / decode round trip", () => {
       topics: [{ kind: "preset", id: "top", label: "Top Stories" }],
       language: "en",
       youtubeStreams: ["app", "youtube"],
-      youtubeNews: true
+      youtubeNews: true,
+      maxAgeDays: 30
     });
   });
 
@@ -114,7 +116,8 @@ describe("encode / decode round trip", () => {
       topics: [],
       language: "en",
       youtubeStreams: ["app", "youtube"],
-      youtubeNews: true
+      youtubeNews: true,
+      maxAgeDays: 30
     });
   });
 });
@@ -306,5 +309,45 @@ describe("keeping YouTube searches to news", () => {
     const encoded = encodeConfig({ sources: [YT], topics: ["top"], youtubeNews: false });
     expect(JSON.parse(decodeURIComponent(encoded)).youtubeNews).toBe(false);
     expect(decodeConfig(encoded).youtubeNews).toBe(false);
+  });
+});
+
+describe("how far back stories may go", () => {
+  const YT = { provider: "youtube", apiKey: "AIza-key" };
+
+  test("is 30 days when not set, including for every addon installed before it existed", () => {
+    expect(maxAgeDays({})).toBe(30);
+    expect(maxAgeDays(undefined)).toBe(30);
+    expect(decodeConfig(JSON.stringify({ sources: [YT], topics: ["top"] })).maxAgeDays).toBe(30);
+  });
+
+  test("takes any whole number of days from 0 up, with no upper limit", () => {
+    for (const days of [0, 1, 7, 30, 365, 100000]) {
+      expect(maxAgeDays({ maxAgeDays: days })).toBe(days);
+    }
+  });
+
+  test("accepts a number written as a string in a hand-edited URL", () => {
+    expect(maxAgeDays({ maxAgeDays: "7" })).toBe(7);
+    expect(maxAgeDays({ maxAgeDays: "0" })).toBe(0);
+  });
+
+  test("falls back to 30 for anything that is not a whole number of days", () => {
+    for (const bad of [-1, 1.5, NaN, Infinity, "abc", "", "  ", "-3", "2.5", null, true, [], {}, 2 ** 60]) {
+      expect(maxAgeDays({ maxAgeDays: bad })).toBe(30);
+    }
+  });
+
+  test("is left out of the URL at the default, so existing URLs do not change", () => {
+    const encoded = decodeURIComponent(encodeConfig({ sources: [YT], topics: ["top"], maxAgeDays: 30 }));
+    expect(JSON.parse(encoded)).not.toHaveProperty("maxAgeDays");
+  });
+
+  test("is written into the URL when changed, 0 included, and survives the round trip", () => {
+    for (const days of [0, 7, 365]) {
+      const encoded = encodeConfig({ sources: [YT], topics: ["top"], maxAgeDays: days });
+      expect(JSON.parse(decodeURIComponent(encoded)).maxAgeDays).toBe(days);
+      expect(decodeConfig(encoded).maxAgeDays).toBe(days);
+    }
   });
 });
