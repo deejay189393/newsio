@@ -59,6 +59,17 @@ That last one does the most work. In the samples taken while building this, an
 impersonator channel calling itself "CNN News USA" sat at 3 views beside
 Bloomberg's 241,766 on the same query.
 
+**Using it as a general YouTube catalog.** The YouTube card has a *Keep
+searches to news* switch, on by default. Turn it off and your own topics and
+the search box become plain YouTube searches: the query goes in as typed (no
+"news" appended), ranked **most relevant first**, at **any length**, with **no
+view floor** — searching "Slow Horses" then finds the trailers, clips and
+episodes rather than coverage of them. What keeps a result playable stays:
+embeddable only, no unaired premieres, and your language. The built-in topics
+are news subjects by definition and stay news catalogs either way. The
+setting is stored only when it is off (`"youtubeNews": false`), so every
+addon installed before it existed keeps the behaviour it had.
+
 The hard limit is **100 searches per day** per key — the same ceiling as GNews,
 and Google states it plainly. A catalog page costs one, and pages already
 fetched come from cache, so ordinary scrolling is cheap; a cold jump deep into
@@ -240,7 +251,8 @@ and your language are encoded into your own addon URL as one path segment,
 using the SDK's native convention:
 
 ```js
-encodeURIComponent(JSON.stringify({ sources, topics, language }))
+encodeURIComponent(JSON.stringify({ sources, topics, language, youtubeStreams }))
+// plus "youtubeNews": false, only when YouTube searches are not kept to news
 
 // sources is ordered — the order is the failover chain:
 [{ provider: "currents", apiKey: "…" }, { provider: "newsdata", apiKey: "…" }]

@@ -81,7 +81,7 @@ function usableSources(sources, { topic, query, language }) {
  * failing over would splice a second source's page 1 onto another's page 3,
  * repeating stories the reader has already scrolled past.
  */
-async function fetchCatalogPage(sources, { topic, query, language, skip = 0 }) {
+async function fetchCatalogPage(sources, { topic, query, language, skip = 0, youtubeNews = true }) {
   const candidates = usableSources(sources, { topic, query, language });
   const attempts = [];
 
@@ -92,7 +92,8 @@ async function fetchCatalogPage(sources, { topic, query, language, skip = 0 }) {
         topic,
         query,
         language,
-        skip
+        skip,
+        youtubeNews
       });
 
       if (skip === 0 && page.articles.length === 0 && !page.truncated) {

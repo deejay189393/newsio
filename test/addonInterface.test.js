@@ -311,3 +311,58 @@ describe("custom topic catalogs", () => {
     expect(new URL(global.fetch.mock.calls[0][0]).searchParams.get("video")).toBe("1");
   });
 });
+
+describe("keeping YouTube searches to news", () => {
+  const YT_CONFIG = {
+    sources: [{ provider: "youtube", apiKey: "AIza-key" }],
+    topics: ["sports", { q: "Slow Horses" }],
+    language: "en"
+  };
+  // An empty search result: the request is what these tests are about.
+  const searched = () => {
+    global.fetch = jest.fn().mockResolvedValue(ok({ items: [] }));
+  };
+  const firstQuery = () => new URL(global.fetch.mock.calls[0][0]).searchParams;
+
+  test("by default a search on YouTube adds \"news\" and is newest first", async () => {
+    searched();
+    await iface.get("catalog", "news", SEARCH_CATALOG_ID, { search: "slow horses" }, YT_CONFIG);
+    expect(firstQuery().get("q")).toBe("slow horses news");
+    expect(firstQuery().get("order")).toBe("date");
+  });
+
+  test("switched off, a search is sent as typed, most relevant first", async () => {
+    searched();
+    await iface.get("catalog", "news", SEARCH_CATALOG_ID, { search: "slow horses" }, { ...YT_CONFIG, youtubeNews: false });
+    expect(firstQuery().get("q")).toBe("slow horses");
+    expect(firstQuery().get("order")).toBe("relevance");
+    expect(firstQuery().has("videoDuration")).toBe(false);
+  });
+
+  test("switched off, a custom catalog is a plain YouTube search too", async () => {
+    searched();
+    await iface.get("catalog", "news", "q_slow-horses", {}, { ...YT_CONFIG, youtubeNews: false });
+    expect(firstQuery().get("q")).toBe("Slow Horses");
+    expect(firstQuery().get("order")).toBe("relevance");
+  });
+
+  test("switched off, a preset topic is still a news catalog", async () => {
+    searched();
+    await iface.get("catalog", "news", "sports", {}, { ...YT_CONFIG, youtubeNews: false });
+    expect(firstQuery().get("q")).toBe("sports news");
+    expect(firstQuery().get("videoCategoryId")).toBe("25");
+  });
+
+  test("a hand-edited value other than false leaves it on", async () => {
+    searched();
+    await iface.get("catalog", "news", "q_slow-horses", {}, { ...YT_CONFIG, youtubeNews: "false" });
+    expect(firstQuery().get("q")).toBe("Slow Horses news");
+  });
+
+  test("other sources are not affected", async () => {
+    global.fetch = jest.fn().mockResolvedValue(ok({ results: [article("s1")], nextPage: null }));
+    const config = { sources: [{ provider: "newsdata", apiKey: "k" }], topics: [{ q: "Slow Horses" }], youtubeNews: false };
+    await iface.get("catalog", "news", "q_slow-horses", {}, config);
+    expect(firstQuery().get("q")).toBe("Slow Horses");
+  });
+});

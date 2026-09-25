@@ -3,7 +3,7 @@ const { buildInterfaceManifest, SEARCH_CATALOG_ID } = require("./manifest");
 const { VALID_LANGUAGE_CODES } = require("./providers");
 const { normalizeTopics, isPresetTopicId } = require("./topics");
 const { fetchCatalogPage, getArticle } = require("./sources");
-const { normalizeSources } = require("./config");
+const { normalizeSources, youtubeNewsEnabled } = require("./config");
 const { toMetaPreview, toFullMeta, toStreams } = require("./stremioMeta");
 const { currentBaseUrl } = require("./requestContext");
 const { isPlaybackHealthy } = require("./youtubeHealth");
@@ -67,7 +67,8 @@ function createAddonInterface() {
       topic: isSearch || custom ? undefined : id,
       query: searchQuery,
       language: safeLanguage(config && config.language),
-      skip
+      skip,
+      youtubeNews: youtubeNewsEnabled(config)
     });
 
     return { metas: articles.map(toMetaPreview), cacheMaxAge: 600 };

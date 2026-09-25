@@ -197,8 +197,8 @@ describe("fetchCatalogPage — failover", () => {
 
   test("passes the topic, query, language and skip straight through", async () => {
     const c = stub(currents, async () => pageOf("cu_"));
-    await fetchCatalogPage([CUR], { topic: "sports", query: "cup", language: "fr", skip: 40 });
-    expect(c).toHaveBeenCalledWith({ apiKey: "cur-key", topic: "sports", query: "cup", language: "fr", skip: 40 });
+    await fetchCatalogPage([CUR], { topic: "sports", query: "cup", language: "fr", skip: 40, youtubeNews: true });
+    expect(c).toHaveBeenCalledWith({ apiKey: "cur-key", topic: "sports", query: "cup", language: "fr", skip: 40, youtubeNews: true });
   });
 
   test("a truncated page is a real answer, not a reason to fail over", async () => {
@@ -305,7 +305,7 @@ describe("a source that needs no key — NewsMCP", () => {
     const spy = stub(newsmcp, async () => pageOf("nm_", 20));
     const page = await fetchCatalogPage([NM, CUR], { topic: "top", language: "en" });
     expect(page.provider).toBe("newsmcp");
-    expect(spy).toHaveBeenCalledWith({ apiKey: "", topic: "top", query: undefined, language: "en", skip: 0 });
+    expect(spy).toHaveBeenCalledWith({ apiKey: "", topic: "top", query: undefined, language: "en", skip: 0, youtubeNews: true });
   });
 
   test("a German catalog never reaches it", async () => {
@@ -381,5 +381,19 @@ describe("a source that needs no key — NewsMCP", () => {
     const lookup = jest.spyOn(newsmcp, "getArticleById");
     await expect(getArticle([CUR], "nm_evt_1")).resolves.toBeNull();
     expect(lookup).not.toHaveBeenCalled();
+  });
+});
+
+describe("keeping YouTube searches to news", () => {
+  test("is passed to the provider as set", async () => {
+    const c = stub(currents, async () => pageOf("cu_"));
+    await fetchCatalogPage([CUR], { query: "slow horses", language: "en", youtubeNews: false });
+    expect(c).toHaveBeenCalledWith(expect.objectContaining({ query: "slow horses", youtubeNews: false }));
+  });
+
+  test("is on when the caller does not say", async () => {
+    const c = stub(currents, async () => pageOf("cu_"));
+    await fetchCatalogPage([CUR], { query: "slow horses", language: "en" });
+    expect(c).toHaveBeenCalledWith(expect.objectContaining({ youtubeNews: true }));
   });
 });

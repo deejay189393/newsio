@@ -402,3 +402,37 @@ describe("the source is easy to find", () => {
     expect(REPO_URL).toBe("https://github.com/deejay189393/newsio");
   });
 });
+
+describe("keeping YouTube searches to news, on the page", () => {
+  const render = (existing) => renderConfigurePage({ baseUrl: BASE, existing });
+  const box = (markup) => markup.match(/<input type="checkbox" id="yt-news"[^>]*>/)[0];
+  const youtubeCard = (markup) => {
+    const start = markup.indexOf('data-provider="youtube"');
+    return markup.slice(start, markup.indexOf('<div class="source" data-provider=', start + 1));
+  };
+
+  test("is offered once, inside the YouTube card", () => {
+    const markup = render(null);
+    expect((markup.match(/id="yt-news"/g) || []).length).toBe(1);
+    expect(youtubeCard(markup)).toContain('id="yt-news"');
+  });
+
+  test("is ticked for a new setup", () => {
+    expect(box(render(null))).toContain("checked");
+  });
+
+  test("is ticked when reconfiguring an addon that never set it", () => {
+    expect(box(render({ sources: [], topics: [], language: "en" }))).toContain("checked");
+  });
+
+  test("is unticked when reconfiguring an addon that turned it off", () => {
+    expect(box(render({ sources: [], topics: [], language: "en", youtubeNews: false }))).not.toContain("checked");
+  });
+
+  test("says what it does and what it leaves alone", () => {
+    const card = youtubeCard(render(null));
+    expect(card).toContain("Keep searches to news");
+    expect(card).toContain("most relevant first");
+    expect(card).toContain("The built-in topics stay news either way.");
+  });
+});
