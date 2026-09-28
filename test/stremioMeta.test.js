@@ -696,12 +696,19 @@ describe("a YouTube story offers both ways to watch it", () => {
     // the manifest rather than the .mp4 because the muxed file tops out at
     // 360p -- 1080p only exists as separate video and audio files.
     const streams = toStreams(ytArticle, { baseUrl: "https://newsio.up.railway.app" });
-    expect(streams).toHaveLength(2);
+    expect(streams).toHaveLength(3);
     expect(streams[0].url).toBe("https://newsio.up.railway.app/yt/dQw4w9WgXcQ/manifest.mpd");
     expect(streams[0].ytId).toBeUndefined();
     expect(streams[0].title).toBe("Play video in app (Reuters)");
     expect(streams[1].externalUrl).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
     expect(streams[1].title).toBe("Open in YouTube app (Reuters)");
+    // Direct from YouTube comes last by default, until Nuvio ships support.
+    expect(streams[2]).toEqual({
+      name: "Newsio",
+      title: "Play video in app, direct from YouTube (Reuters)",
+      description: "Play video in app, direct from YouTube (Reuters)",
+      ytId: "dQw4w9WgXcQ"
+    });
   });
 
   test("the order is the user's choice, so a break in playback is reconfigurable", () => {
@@ -782,20 +789,23 @@ describe("when YouTube is refusing to serve this server", () => {
   const streams = (over) =>
     toStreams(ytArticle, { baseUrl: "https://newsio.up.railway.app", ...over });
 
-  test("the working option leads, so the first thing selected actually plays", () => {
+  test("the working options lead, so the first thing selected actually plays", () => {
     const s = streams({ youtubeHealthy: false });
     expect(s[0].externalUrl).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
-    expect(s[1].url).toContain("/manifest.mpd");
+    // Direct from YouTube never touches this server, so a refusal of this
+    // server does not move it.
+    expect(s[1].ytId).toBe("dQw4w9WgXcQ");
+    expect(s[2].url).toContain("/manifest.mpd");
   });
 
   test("the demoted option says why rather than just failing when picked", () => {
     const s = streams({ youtubeHealthy: false });
-    expect(s[1].title).toContain("unavailable right now");
-    expect(s[1].description).toContain("refusing to serve this server");
+    expect(s[2].title).toContain("unavailable right now");
+    expect(s[2].description).toContain("refusing to serve this server");
   });
 
   test("it is still offered, because the block lifts on its own", () => {
-    expect(streams({ youtubeHealthy: false })).toHaveLength(2);
+    expect(streams({ youtubeHealthy: false })).toHaveLength(3);
   });
 
   test("a healthy server is unaffected", () => {
@@ -883,5 +893,59 @@ describe("a story read at several outlets — NewsMCP", () => {
     expect(outlets(textArticle)).toEqual([{ name: "Business Wire", url: "https://example.com/a2" }]);
     expect(outlets({ ...textArticle, sources: [] })).toEqual([{ name: "Business Wire", url: "https://example.com/a2" }]);
     expect(outlets({ ...textArticle, sources: "nope" })).toEqual([{ name: "Business Wire", url: "https://example.com/a2" }]);
+  });
+});
+
+describe("direct from YouTube: a stream that is only a ytId", () => {
+  const ytArticle = {
+    id: "yt_dQw4w9WgXcQ",
+    title: "Reuters headlines",
+    link: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    sourceName: "Reuters",
+    keywords: [],
+    categories: [],
+    provider: "youtube"
+  };
+  const streams = (over) => toStreams(ytArticle, { baseUrl: "https://newsio.up.railway.app", ...over });
+
+  test("carries the id and nothing a client could play instead", () => {
+    // Nuvio resolves a ytId only when the stream has no url, externalUrl,
+    // torrent or debrid link; any of them would be used in its place.
+    const [only] = streams({ youtubeStreams: ["ytid"] });
+    expect(only.ytId).toBe("dQw4w9WgXcQ");
+    for (const field of ["url", "externalUrl", "infoHash", "fileIdx", "behaviorHints"]) {
+      expect(only).not.toHaveProperty(field);
+    }
+  });
+
+  test("names the channel, like every other YouTube row", () => {
+    expect(streams({ youtubeStreams: ["ytid"] })[0].title).toBe(
+      "Play video in app, direct from YouTube (Reuters)"
+    );
+  });
+
+  test("can lead when chosen first", () => {
+    const s = streams({ youtubeStreams: ["ytid", "app", "youtube"] });
+    expect(s.map((x) => x.ytId || x.url || x.externalUrl)).toEqual([
+      "dQw4w9WgXcQ",
+      "https://newsio.up.railway.app/yt/dQw4w9WgXcQ/manifest.mpd",
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+    ]);
+  });
+
+  test("keeps its place when this server is refused, and still leads if it led", () => {
+    const s = streams({ youtubeStreams: ["ytid", "app", "youtube"], youtubeHealthy: false });
+    expect(s[0].ytId).toBe("dQw4w9WgXcQ");
+    expect(s[1].externalUrl).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+    expect(s[2].url).toContain("/manifest.mpd");
+  });
+
+  test("a list handed over without it stays without it", () => {
+    // The stream handler passes the list already read from the config; it is
+    // taken as saved, so turning this option off is respected.
+    const s = streams({ youtubeStreams: ["app", "youtube"] });
+    expect(s).toHaveLength(2);
+    expect(s.some((x) => x.ytId)).toBe(false);
   });
 });

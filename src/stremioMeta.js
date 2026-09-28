@@ -1,7 +1,7 @@
 const { CONTENT_TYPE } = require("./manifest");
 const { getTopicLabel } = require("./topics");
 const { FALLBACK_POSTER, FALLBACK_BACKGROUND } = require("./fallbackImages");
-const { normalizeYoutubeStreams, externalUrlFor } = require("./youtubeStreams");
+const { normalizeYoutubeStreams, externalUrlFor, YOUTUBE_STREAMS_VERSION } = require("./youtubeStreams");
 
 /**
  * Stremio shows `releaseInfo` verbatim, so we normalize to a plain date and
@@ -414,6 +414,14 @@ const YOUTUBE_ID = /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|v\/)|
  * a YouTube application.
  */
 function buildYoutubeStream(optionId, { article, youtubeId, baseUrl, down }) {
+  // Nothing but the id, deliberately: a client plays a `ytId` stream only
+  // when it has no `url` or `externalUrl` to use instead -- Nuvio resolves
+  // one on the device only when nothing else on the stream can play.
+  if (optionId === "ytid") {
+    const label = `Play video in app, direct from YouTube (${article.sourceName})`;
+    return { name: "Newsio", title: label, description: label, ytId: youtubeId };
+  }
+
   const external = externalUrlFor(optionId, youtubeId);
   if (external) {
     const label =
@@ -481,13 +489,18 @@ function toVideoStream(article) {
  * always offered too, as an externalUrl, so reading the full story is one
  * tap away whether or not a video exists.
  *
- * YouTube is the exception and gets its own pair. `ytId` looked like the
- * right answer -- it is what the protocol documents -- but Nuvio resolves a
+ * YouTube is the exception and gets its own rows. `ytId` looked like the
+ * right answer -- it is what the protocol documents -- but Nuvio resolved a
  * stream through `url` and `externalUrl` only, so a `ytId` row rendered in
  * the list and did nothing when tapped. In-app playback therefore points at
  * this addon's own DASH manifest, which is what makes 1080p possible: the
  * high-quality formats are adaptive, video and audio as separate files, and
  * only a manifest can name both.
+ *
+ * Nuvio has since learned `ytId` (NuvioMedia/NuvioTV#3693, after
+ * 1.1.0-beta.2): it resolves the video on the device, which sidesteps
+ * YouTube refusing this server altogether. So a bare `ytId` row is offered
+ * too, last for now, while installed Nuvio versions still predate it.
  *
  * Which of the two leads is the user's choice, because in-app playback
  * leans on an undocumented YouTube API. If that breaks, flipping the setting
@@ -496,7 +509,10 @@ function toVideoStream(article) {
 function toStreams(article, { baseUrl, youtubeStreams, youtubeHealthy = true } = {}) {
   const youtubeId = article.provider === "youtube" && baseUrl ? youtubeIdOf(article) : null;
   if (youtubeId) {
-    const chosen = normalizeYoutubeStreams(youtubeStreams);
+    // The list arrives already read from the config (see youtubeStreamsOf),
+    // so it is taken as saved: reading it as an older version would add back
+    // an option the reader turned off.
+    const chosen = normalizeYoutubeStreams(youtubeStreams, undefined, YOUTUBE_STREAMS_VERSION);
     // In-app playback depends on YouTube being willing to serve this server,
     // and it sometimes is not. While it is refused the option is kept but
     // sent to the back, so the row the viewer lands on is one that works.

@@ -1,7 +1,7 @@
 const { LANGUAGES, PROVIDERS } = require("./providers");
 const { DESCRIPTION } = require("./manifest");
 const { PRESET_TOPICS, normalizeTopics, MAX_CUSTOM_TOPICS, MAX_QUERY_LENGTH } = require("./topics");
-const { normalizeYoutubeStreams, orderedYoutubeOptions } = require("./youtubeStreams");
+const { youtubeStreamsOf, orderedYoutubeOptions, YOUTUBE_STREAMS_VERSION } = require("./youtubeStreams");
 const { youtubeNewsEnabled, maxAgeDays } = require("./config");
 const { DEFAULT_MAX_AGE_DAYS } = require("./articles");
 
@@ -133,10 +133,7 @@ function renderConfigurePage({ baseUrl, existing }) {
   const language = (existing && existing.language) || "en";
   const isReconfigure = Boolean(existing);
   const savedKeys = new Map(((existing && existing.sources) || []).map((s) => [s.provider, s.apiKey]));
-  const youtubeStreams = normalizeYoutubeStreams(
-    existing && existing.youtubeStreams,
-    existing && existing.youtubePlayback
-  );
+  const youtubeStreams = youtubeStreamsOf(existing);
   const youtubeNews = youtubeNewsEnabled(existing);
   const maxAge = maxAgeDays(existing);
 
@@ -437,6 +434,7 @@ function renderConfigurePage({ baseUrl, existing }) {
   var ENGLISH_ONLY = ${jsonForScript(ENGLISH_ONLY)};
   var NO_SOURCE_MESSAGE = ${jsonForScript(`Add a key for at least one news source, or turn on ${keylessLabels}.`)};
   var DEFAULT_MAX_AGE_DAYS = ${DEFAULT_MAX_AGE_DAYS};
+  var YOUTUBE_STREAMS_VERSION = ${YOUTUBE_STREAMS_VERSION};
 
   // Digits only: no sign, no decimal point, no exponent. A regex would be
   // shorter, but this script has to stay backslash-free (see above).
@@ -772,7 +770,10 @@ function renderConfigurePage({ baseUrl, existing }) {
       sources: sources,
       topics: topics,
       language: language,
-      youtubeStreams: youtubeStreams
+      youtubeStreams: youtubeStreams,
+      // Saved against today's option list, so an option left unticked here
+      // stays off rather than being added back as new.
+      youtubeStreamsVersion: YOUTUBE_STREAMS_VERSION
     };
     if (ytNews && !ytNews.checked) config.youtubeNews = false;
     // Only a change from the default goes in the URL.

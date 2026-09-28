@@ -7,6 +7,7 @@ const { normalizeSources, youtubeNewsEnabled, maxAgeDays } = require("./config")
 const { toMetaPreview, toFullMeta, toStreams } = require("./stremioMeta");
 const { currentBaseUrl } = require("./requestContext");
 const { isPlaybackHealthy } = require("./youtubeHealth");
+const { youtubeStreamsOf } = require("./youtubeStreams");
 
 /**
  * Wires the catalog/meta/stream logic into the official stremio-addon-sdk
@@ -90,7 +91,10 @@ function createAddonInterface() {
     return {
       streams: toStreams(article, {
         baseUrl: currentBaseUrl(),
-        youtubeStreams: config && config.youtubeStreams,
+        // Read through the one helper, so an install that still carries the
+        // older single choice, or a list saved before an option existed, gets
+        // the order it was configured with rather than the default.
+        youtubeStreams: youtubeStreamsOf(config),
         youtubeHealthy: isPlaybackHealthy()
       }),
       cacheMaxAge: 3600

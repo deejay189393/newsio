@@ -1,6 +1,6 @@
 const { isValidProviderId, isKeyOptional, getProvider, VALID_LANGUAGE_CODES, PROVIDERS } = require("./providers");
 const { normalizeTopics, toStoredTopics } = require("./topics");
-const { normalizeYoutubeStreams } = require("./youtubeStreams");
+const { youtubeStreamsOf, YOUTUBE_STREAMS_VERSION } = require("./youtubeStreams");
 const { DEFAULT_MAX_AGE_DAYS } = require("./articles");
 
 /**
@@ -29,6 +29,7 @@ function encodeConfig(config) {
       topics: toStoredTopics(normalized.topics),
       language: normalized.language,
       youtubeStreams: normalized.youtubeStreams,
+      youtubeStreamsVersion: normalized.youtubeStreamsVersion,
       // On unless switched off, so it is stored only when it is off.
       ...(normalized.youtubeNews ? {} : { youtubeNews: false }),
       // Likewise stored only when it is not the default.
@@ -49,11 +50,11 @@ function normalizeConfig(config) {
     language: validLanguage(config && config.language),
     // `youtubePlayback` is the older single-choice form; an addon installed
     // before this existed still carries it, so it is migrated rather than
-    // ignored, which would silently reorder someone's play button.
-    youtubeStreams: normalizeYoutubeStreams(
-      config && config.youtubeStreams,
-      config && config.youtubePlayback
-    ),
+    // ignored, which would silently reorder someone's play button. A list
+    // saved before an option existed gains that option at the bottom.
+    youtubeStreams: youtubeStreamsOf(config),
+    // Once read, the list is in the current version's terms.
+    youtubeStreamsVersion: YOUTUBE_STREAMS_VERSION,
     youtubeNews: youtubeNewsEnabled(config),
     maxAgeDays: maxAgeDays(config)
   };

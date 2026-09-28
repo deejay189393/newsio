@@ -408,3 +408,72 @@ describe("how far back stories may go", () => {
     expect(ids(res)).toEqual(["nd_fresh", "nd_week"]);
   });
 });
+
+describe("the YouTube rows a stream request returns", () => {
+  const { articleCache } = require("../src/cache");
+  const { withBaseUrl } = require("../src/requestContext");
+  const BASE_URL = "https://newsio.up.railway.app";
+  const ID = "yt_stream_test";
+  const YT = { sources: [{ provider: "youtube", apiKey: "AIza-key" }], topics: ["top"], language: "en" };
+
+  beforeEach(() => {
+    articleCache.set(ID, {
+      id: ID,
+      title: "Reuters headlines",
+      link: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      sourceName: "Reuters",
+      keywords: [],
+      categories: [],
+      provider: "youtube"
+    });
+  });
+
+  const rows = async (config) => {
+    const res = await withBaseUrl(BASE_URL, () => iface.get("stream", "news", ID, {}, config));
+    return res.streams.map((s) => (s.ytId ? "ytid" : s.url ? "app" : s.externalUrl.startsWith("vnd.") ? "smarttube" : "youtube"));
+  };
+
+  test("a new config gets in-app, the YouTube app, then direct from YouTube", async () => {
+    expect(await rows({ ...YT, youtubeStreams: ["app", "youtube", "ytid"], youtubeStreamsVersion: 2 })).toEqual([
+      "app",
+      "youtube",
+      "ytid"
+    ]);
+  });
+
+  test("the direct row is the bare ytId, which is what Nuvio and Stremio play on the device", async () => {
+    const res = await withBaseUrl(BASE_URL, () =>
+      iface.get("stream", "news", ID, {}, { ...YT, youtubeStreams: ["ytid"], youtubeStreamsVersion: 2 })
+    );
+    expect(res.streams).toEqual([
+      {
+        name: "Newsio",
+        title: "Play video in app, direct from YouTube (Reuters)",
+        description: "Play video in app, direct from YouTube (Reuters)",
+        ytId: "dQw4w9WgXcQ"
+      }
+    ]);
+  });
+
+  test("an install from before this version gains the direct row at the bottom", async () => {
+    expect(await rows({ ...YT, youtubeStreams: ["youtube", "app"] })).toEqual(["youtube", "app", "ytid"]);
+  });
+
+  test("a current config that turned it off does not get it", async () => {
+    expect(await rows({ ...YT, youtubeStreams: ["youtube", "app"], youtubeStreamsVersion: 2 })).toEqual([
+      "youtube",
+      "app"
+    ]);
+  });
+
+  test("an install still on the older single choice keeps its order here too", async () => {
+    // It used to reach this handler as no list at all, which meant the
+    // default order, whatever the configure page showed.
+    expect(await rows({ ...YT, youtubePlayback: "youtube" })).toEqual(["youtube", "app", "ytid"]);
+  });
+
+  test("no saved list at all is the default", async () => {
+    expect(await rows(YT)).toEqual(["app", "youtube", "ytid"]);
+  });
+});
