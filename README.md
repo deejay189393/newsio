@@ -251,7 +251,7 @@ and your language are encoded into your own addon URL as one path segment,
 using the SDK's native convention:
 
 ```js
-encodeURIComponent(JSON.stringify({ sources, topics, language, youtubeStreams }))
+encodeURIComponent(JSON.stringify({ sources, topics, language, youtubeStreams, youtubeStreamsVersion }))
 // plus "youtubeNews": false, only when YouTube searches are not kept to news
 // plus "maxAgeDays": n, only when it is not the default 30
 
@@ -321,7 +321,7 @@ The ▶ marker still only appears where playback will really work: a story whose
 `video_url` is an embed page rather than a media file is left unmarked, because
 Stremio can only hand that to a browser.
 
-**A YouTube story offers up to three ways to watch, and you choose which and
+**A YouTube story offers up to four ways to watch, and you choose which and
 in what order** on the configure page. Each is independently on or off, and
 the order you put them in is the order Nuvio lists them, so the first enabled
 one is what the play button lands on:
@@ -331,10 +331,27 @@ one is what the play button lands on:
 | **Play in-app** | our DASH manifest | best quality YouTube offers |
 | **Open in the YouTube app** | `https://www.youtube.com/watch?v=…` | a browser can also take this |
 | **Open in the SmartTube app** | `vnd.youtube:<id>` | no browser registers it, so only an app can |
+| **Play in-app, direct from YouTube** | `ytId` and nothing else | your app fetches the video itself |
 
-The default is in-app then the YouTube app. SmartTube is off until you turn it
-on, because it is a separately installed application and an option that opens
-nothing is a dead row.
+The default is in-app, the YouTube app, then direct from YouTube. SmartTube is
+off until you turn it on, because it is a separately installed application and
+an option that opens nothing is a dead row.
+
+**Direct from YouTube** is the one way to watch that does not depend on
+YouTube tolerating this server: the stream carries only the video's id, and
+the app resolves it on the device, from the viewer's own connection. Stremio
+plays it in its built-in YouTube player. Nuvio learned it in
+[NuvioMedia/NuvioTV#3693](https://github.com/NuvioMedia/NuvioTV/pull/3693),
+merged after 1.1.0-beta.2; it plays such a stream in its own player through
+the extractor its trailers use, only when the stream has no `url` or
+`externalUrl`, which is why this row carries nothing else. Until that release
+reaches people's televisions, an older Nuvio lists the row and cannot play it,
+so for now it comes last; once the release is out it can move to the top.
+
+Addon URLs record which version of this option list they were saved against
+(`"youtubeStreamsVersion": 2`). A list saved before direct-from-YouTube existed
+never had the chance to include it, so it gains it at the bottom rather than
+being read as having turned it off; a list saved since is kept exactly.
 
 Worth being precise about the two external ones, because the naming promises
 more than the platform can deliver. Nuvio opens an external stream with
