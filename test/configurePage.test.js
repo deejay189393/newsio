@@ -279,18 +279,17 @@ describe("the YouTube stream options on the page", () => {
     return row.slice(0, row.indexOf("</li>")).includes("checked");
   };
 
-  test("all four are listed, each with a toggle", () => {
+  test("all three are listed, each with a toggle", () => {
     const markup = render(null);
-    expect(rows(markup)).toEqual(["app", "youtube", "ytid", "smarttube"]);
-    expect((markup.match(/class="yt-option-on"/g) || []).length).toBe(4);
+    expect(rows(markup)).toEqual(["app", "youtube", "smarttube"]);
+    expect((markup.match(/class="yt-option-on"/g) || []).length).toBe(3);
   });
 
-  test("by default in-app, the YouTube app and direct-from-YouTube are ticked, SmartTube is not", () => {
+  test("by default in-app and the YouTube app are ticked, SmartTube is not", () => {
     const markup = render(null);
-    expect((markup.match(/class="yt-option-on" checked/g) || []).length).toBe(3);
+    expect((markup.match(/class="yt-option-on" checked/g) || []).length).toBe(2);
     expect(ticked(markup, "app")).toBe(true);
     expect(ticked(markup, "youtube")).toBe(true);
-    expect(ticked(markup, "ytid")).toBe(true);
     expect(ticked(markup, "smarttube")).toBe(false);
   });
 
@@ -300,44 +299,62 @@ describe("the YouTube stream options on the page", () => {
       topics: [],
       language: "en",
       youtubeStreams: ["smarttube", "app"],
-      youtubeStreamsVersion: 2
+      youtubeStreamsVersion: 3
     });
     // Chosen ones in their order, then whatever was turned off.
-    expect(rows(markup)).toEqual(["smarttube", "app", "youtube", "ytid"]);
-    expect(ticked(markup, "ytid")).toBe(false);
+    expect(rows(markup)).toEqual(["smarttube", "app", "youtube"]);
+    expect(ticked(markup, "youtube")).toBe(false);
   });
 
   test("a disabled option is still listed, so it can be turned back on", () => {
-    const markup = render({ sources: [], topics: [], language: "en", youtubeStreams: ["app"], youtubeStreamsVersion: 2 });
-    expect(rows(markup)).toHaveLength(4);
+    const markup = render({ sources: [], topics: [], language: "en", youtubeStreams: ["app"], youtubeStreamsVersion: 3 });
+    expect(rows(markup)).toHaveLength(3);
     expect((markup.match(/class="yt-option-on" checked/g) || []).length).toBe(1);
   });
 
-  test("an addon saved before direct-from-YouTube existed shows it ticked, at the bottom of its list", () => {
-    const markup = render({ sources: [], topics: [], language: "en", youtubeStreams: ["youtube", "app"] });
-    expect(rows(markup)).toEqual(["youtube", "app", "ytid", "smarttube"]);
-    expect(ticked(markup, "ytid")).toBe(true);
+  test("an addon that had direct-from-YouTube on shows in-app ticked in its place", () => {
+    const markup = render({
+      sources: [],
+      topics: [],
+      language: "en",
+      youtubeStreams: ["youtube", "ytid"],
+      youtubeStreamsVersion: 2
+    });
+    expect(rows(markup)).toEqual(["youtube", "app", "smarttube"]);
+    expect(ticked(markup, "app")).toBe(true);
     expect(ticked(markup, "smarttube")).toBe(false);
+    expect(markup).not.toContain('data-option="ytid"');
+  });
+
+  test("an addon saved before versions existed keeps the in-app row it gained", () => {
+    const markup = render({ sources: [], topics: [], language: "en", youtubeStreams: ["youtube"] });
+    expect(rows(markup)).toEqual(["youtube", "app", "smarttube"]);
+    expect(ticked(markup, "app")).toBe(true);
   });
 
   test("a legacy single-choice config is shown back migrated", () => {
     const markup = render({ sources: [], topics: [], language: "en", youtubePlayback: "youtube" });
-    expect(rows(markup)).toEqual(["youtube", "app", "ytid", "smarttube"]);
+    expect(rows(markup)).toEqual(["youtube", "app", "smarttube"]);
   });
 
   test("every row can be moved", () => {
     const markup = render(null);
-    expect((markup.match(/class="yt-up"/g) || []).length).toBe(4);
-    expect((markup.match(/class="yt-down"/g) || []).length).toBe(4);
+    expect((markup.match(/class="yt-up"/g) || []).length).toBe(3);
+    expect((markup.match(/class="yt-down"/g) || []).length).toBe(3);
   });
 
   test("the labels read as intended", () => {
     const markup = render(null);
-    expect(markup).toContain("Play in-app");
+    expect(markup).toContain("Play video in app");
     expect(markup).toContain("Open in the YouTube app");
     expect(markup).toContain("Open in the SmartTube app");
-    expect(markup).toContain("Play in-app, direct from YouTube");
     expect(markup).toContain("Nuvio needs a release newer than 1.1.0-beta.2");
+    expect(markup).not.toContain("direct from YouTube");
+    expect(markup).not.toContain("Play in-app");
+  });
+
+  test("the page saves at the current option version", () => {
+    expect(render(null)).toContain("var YOUTUBE_STREAMS_VERSION = 3;");
   });
 
   test("it sits inside the YouTube card, where the key is entered", () => {

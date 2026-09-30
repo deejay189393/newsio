@@ -2,10 +2,14 @@
  * Which ways of watching a YouTube story are offered, and in what order.
  *
  * Three options, each independently on or off, and the order they are listed
- * here is the order Nuvio shows them. The first one is what the play button
- * lands on, which is the whole point of making it configurable: in-app
- * playback depends on YouTube being willing to serve this server, and when
- * it is not, a viewer wants the row that works sitting at the top.
+ * here is the order the app shows them. The first one is what the play button
+ * lands on.
+ *
+ * In-app playback sends the video's bare `ytId`, and the app fetches the
+ * video itself: Stremio in its built-in YouTube player, Nuvio through the
+ * extractor its trailers use (from the release after 1.1.0-beta.2). Nothing
+ * passes through this server, so YouTube refusing its address -- which it
+ * does, on and off -- no longer matters.
  *
  * What the addon can and cannot promise about the two external options is
  * worth stating plainly, because it shaped the design:
@@ -47,8 +51,9 @@ const WATCH_URL = "https://www.youtube.com/watch?v=";
 const YOUTUBE_STREAM_OPTIONS = [
   {
     id: "app",
-    label: "Play in-app",
-    note: "Streams through Newsio at the best quality YouTube offers."
+    label: "Play video in app",
+    note:
+      "Your app fetches the video straight from YouTube, at the best quality it offers. Stremio plays it in its built-in YouTube player; Nuvio needs a release newer than 1.1.0-beta.2."
   },
   {
     id: "youtube",
@@ -59,12 +64,6 @@ const YOUTUBE_STREAM_OPTIONS = [
     id: "smarttube",
     label: "Open in the SmartTube app",
     note: "Sends vnd.youtube:, which only a YouTube app can open, never a browser."
-  },
-  {
-    id: "ytid",
-    label: "Play in-app, direct from YouTube",
-    note:
-      "Sends only the YouTube id, and your app fetches the video itself, so YouTube refusing Newsio's server does not matter. Stremio plays it in its built-in YouTube player; Nuvio needs a release newer than 1.1.0-beta.2, and older ones list it but cannot play it."
   }
 ];
 
@@ -72,20 +71,12 @@ const OPTION_IDS = YOUTUBE_STREAM_OPTIONS.map((o) => o.id);
 const OPTIONS_BY_ID = new Map(YOUTUBE_STREAM_OPTIONS.map((o) => [o.id, o]));
 
 /**
- * What a config with nothing saved gets.
- *
- * In-app first, the YouTube app behind it. SmartTube is off rather than on,
- * because it is a separately installed application and an option that opens
- * nothing is exactly the dead row this addon has been removing.
- *
- * Direct-from-YouTube (a bare `ytId`) comes last. It is the one way to watch
- * that does not depend on YouTube tolerating this server, because the app
- * fetches the video itself -- Stremio in its built-in player, Nuvio through
- * the extractor its trailers use. Nuvio only learned it after 1.1.0-beta.2,
- * so for now it sits at the bottom, where an older Nuvio that cannot play it
- * costs nothing; once that release is out it can move up.
+ * What a config with nothing saved gets: in-app first, the YouTube app
+ * behind it. SmartTube is off rather than on, because it is a separately
+ * installed application and an option that opens nothing is exactly the dead
+ * row this addon has been removing.
  */
-const DEFAULT_YOUTUBE_STREAMS = ["app", "youtube", "ytid"];
+const DEFAULT_YOUTUBE_STREAMS = ["app", "youtube"];
 
 /**
  * The version of the option list a config was saved against.
@@ -93,15 +84,28 @@ const DEFAULT_YOUTUBE_STREAMS = ["app", "youtube", "ytid"];
  * A saved list is an explicit choice, so an option missing from it is off.
  * But a list saved before an option existed never had the chance to include
  * it, and reading that as "turned off" would keep a new option away from
- * everyone who installed earlier. So new configs record the version they
- * were saved at, and a list saved at an older one gains, at the bottom,
- * every option added since.
+ * everyone who installed earlier. So configs record the version they were
+ * saved at, and older lists are read in the terms they were saved in.
  *
- *   1 (unrecorded)  app, youtube, smarttube
- *   2               + ytid
+ *   1 (unrecorded)  app (played through this server), youtube, smarttube
+ *   2               + ytid (the bare YouTube id), added at the bottom of
+ *                   every older list
+ *   3               app *is* the bare YouTube id; ytid is folded into it
  */
-const YOUTUBE_STREAMS_VERSION = 2;
-const ADDED_SINCE_VERSION_1 = ["ytid"];
+const YOUTUBE_STREAMS_VERSION = 3;
+
+/**
+ * Options that no longer exist under their own name, and what they became.
+ *
+ * `ytid` was the bare-id option while `app` still played through this
+ * server. Now `app` sends the bare id itself, so a saved `ytid` means `app`,
+ * in the place it held -- and where a list had both, the first one keeps its
+ * place, which is exactly the row that used to lead.
+ */
+const RENAMED_OPTIONS = { ytid: "app" };
+
+/** What every list saved at version 1 was read as having at its bottom. */
+const ADDED_AFTER_VERSION_1 = ["ytid"];
 
 /**
  * The older single-choice setting, mapped onto the list it now means.
@@ -118,29 +122,38 @@ const LEGACY_PLAYBACK_ORDER = {
 /**
  * An ordered, de-duplicated list of known option ids.
  *
- * An empty result falls back to the default rather than leaving a YouTube
- * story with no way at all to watch it: a config that turns everything off
- * is a config that cannot play anything, which is never what was meant.
+ * A list saved before version 2 is first given the option version 2 added,
+ * so every config keeps the rows it was showing; then renamed options are
+ * read as what they became. An empty result falls back to the default rather
+ * than leaving a YouTube story with no way at all to watch it: a config that
+ * turns everything off is a config that cannot play anything, which is never
+ * what was meant.
  */
 function normalizeYoutubeStreams(value, legacy, version) {
-  const savedBeforeCurrent = !(Number(version) >= YOUTUBE_STREAMS_VERSION);
-  const withNewOptions = (list) =>
-    savedBeforeCurrent ? [...list, ...ADDED_SINCE_VERSION_1.filter((id) => !list.includes(id))] : list;
+  const savedAtVersion1 = !(Number(version) >= 2);
+  const withLaterOptions = (list) =>
+    savedAtVersion1 ? [...list, ...ADDED_AFTER_VERSION_1.filter((id) => !list.includes(id))] : list;
 
-  if (!Array.isArray(value)) {
+  let saved;
+  if (Array.isArray(value)) {
+    saved = value;
+  } else {
     const migrated = LEGACY_PLAYBACK_ORDER[legacy];
-    return migrated ? withNewOptions([...migrated]) : [...DEFAULT_YOUTUBE_STREAMS];
+    if (!migrated) return [...DEFAULT_YOUTUBE_STREAMS];
+    saved = migrated;
   }
 
   const seen = new Set();
   const ordered = [];
-  value.forEach((id) => {
-    if (typeof id !== "string" || !OPTIONS_BY_ID.has(id) || seen.has(id)) return;
+  withLaterOptions(saved).forEach((raw) => {
+    if (typeof raw !== "string") return;
+    const id = Object.hasOwn(RENAMED_OPTIONS, raw) ? RENAMED_OPTIONS[raw] : raw;
+    if (!OPTIONS_BY_ID.has(id) || seen.has(id)) return;
     seen.add(id);
     ordered.push(id);
   });
 
-  return ordered.length ? withNewOptions(ordered) : [...DEFAULT_YOUTUBE_STREAMS];
+  return ordered.length ? ordered : [...DEFAULT_YOUTUBE_STREAMS];
 }
 
 /**
@@ -163,7 +176,7 @@ function orderedYoutubeOptions(enabled) {
   return [...chosen, ...rest].map((id) => ({ ...OPTIONS_BY_ID.get(id), enabled: chosen.includes(id) }));
 }
 
-/** The external URI each option hands to Android, or null for the two in-app ones. */
+/** The external URI each option hands to Android, or null for in-app playback. */
 function externalUrlFor(optionId, videoId) {
   if (optionId === "youtube") return `${WATCH_URL}${videoId}`;
   // No browser registers this scheme, so it can only reach a YouTube app.
@@ -177,6 +190,7 @@ module.exports = {
   DEFAULT_YOUTUBE_STREAMS,
   YOUTUBE_STREAMS_VERSION,
   LEGACY_PLAYBACK_ORDER,
+  RENAMED_OPTIONS,
   normalizeYoutubeStreams,
   youtubeStreamsOf,
   orderedYoutubeOptions,
