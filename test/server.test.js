@@ -63,7 +63,7 @@ describe("manifest routes", () => {
     const res = await request(app).get("/manifest.json");
     expect(res.status).toBe(200);
     expect(res.body.id).toBe("org.deejay189393.newsio");
-    expect(res.body.version).toBe("0.16.0");
+    expect(res.body.version).toBe("0.17.0");
     expect(res.body.catalogs).toEqual([]);
     expect(res.body.behaviorHints.configurationRequired).toBe(true);
     expect(res.body.types).toEqual(["news"]);
@@ -491,4 +491,19 @@ describe("end-to-end — a new user with no keys at all, on NewsMCP", () => {
     expect(catalog.body.metas).toEqual([]);
     expect(global.fetch).not.toHaveBeenCalled();
   });
+});
+
+describe("the retired in-app playback routes", () => {
+  // In-app playback is the bare ytId now: the app fetches the video itself,
+  // so this server no longer resolves or proxies YouTube, and asks YouTube
+  // for nothing when one of these old URLs is requested.
+  test.each(["/yt/dQw4w9WgXcQ/manifest.mpd", "/yt/dQw4w9WgXcQ/137", "/yt/dQw4w9WgXcQ.mp4"])(
+    "%s is gone",
+    async (path) => {
+      global.fetch = jest.fn();
+      const res = await request(app).get(path);
+      expect(res.status).toBe(404);
+      expect(global.fetch).not.toHaveBeenCalled();
+    }
+  );
 });

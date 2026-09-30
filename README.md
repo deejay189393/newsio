@@ -321,37 +321,48 @@ The ▶ marker still only appears where playback will really work: a story whose
 `video_url` is an embed page rather than a media file is left unmarked, because
 Stremio can only hand that to a browser.
 
-**A YouTube story offers up to four ways to watch, and you choose which and
+**A YouTube story offers up to three ways to watch, and you choose which and
 in what order** on the configure page. Each is independently on or off, and
-the order you put them in is the order Nuvio lists them, so the first enabled
+the order you put them in is the order the app lists them, so the first enabled
 one is what the play button lands on:
 
 | Option | What it sends | Notes |
 |---|---|---|
-| **Play in-app** | our DASH manifest | best quality YouTube offers |
+| **Play video in app** | `ytId` and nothing else | your app fetches the video itself |
 | **Open in the YouTube app** | `https://www.youtube.com/watch?v=…` | a browser can also take this |
 | **Open in the SmartTube app** | `vnd.youtube:<id>` | no browser registers it, so only an app can |
-| **Play in-app, direct from YouTube** | `ytId` and nothing else | your app fetches the video itself |
 
-The default is in-app, the YouTube app, then direct from YouTube. SmartTube is
-off until you turn it on, because it is a separately installed application and
-an option that opens nothing is a dead row.
+The default is in-app, then the YouTube app. SmartTube is off until you turn it
+on, because it is a separately installed application and an option that opens
+nothing is a dead row.
 
-**Direct from YouTube** is the one way to watch that does not depend on
-YouTube tolerating this server: the stream carries only the video's id, and
-the app resolves it on the device, from the viewer's own connection. Stremio
-plays it in its built-in YouTube player. Nuvio learned it in
-[NuvioMedia/NuvioTV#3693](https://github.com/NuvioMedia/NuvioTV/pull/3693),
-merged after 1.1.0-beta.2; it plays such a stream in its own player through
-the extractor its trailers use, only when the stream has no `url` or
-`externalUrl`, which is why this row carries nothing else. Until that release
-reaches people's televisions, an older Nuvio lists the row and cannot play it,
-so for now it comes last; once the release is out it can move to the top.
+**In-app playback sends only the video's id**, and the app resolves it on the
+device, from the viewer's own connection, at whatever quality YouTube offers.
+Stremio plays it in its built-in YouTube player. Nuvio learned it in
+[NuvioMedia/NuvioTV#3693](https://github.com/NuvioMedia/NuvioTV/pull/3693); it
+plays such a stream in its own player through the extractor its trailers use,
+only when the stream has no `url` or `externalUrl`, which is why this row
+carries nothing else. A Nuvio release from before that change lists the row
+and cannot play it.
+
+Nothing passes through this server, so YouTube refusing its address — which it
+does, on and off, to datacenter IPs — no longer matters. Earlier versions played
+in-app by resolving the video here and proxying a DASH manifest and its bytes
+from `/yt/<id>/…`; that path is gone.
 
 Addon URLs record which version of this option list they were saved against
-(`"youtubeStreamsVersion": 2`). A list saved before direct-from-YouTube existed
-never had the chance to include it, so it gains it at the bottom rather than
-being read as having turned it off; a list saved since is kept exactly.
+(`"youtubeStreamsVersion": 3`), and older ones are read in the terms they were
+saved in, so every installed addon keeps the rows it was showing:
+
+- **Version 2** had a separate *Play in-app, direct from YouTube* option
+  (`ytid`) next to the server-played *Play in-app*. The two are one option now:
+  a saved `ytid` becomes *Play video in app*, and where a list had both, the
+  one listed first keeps its place.
+- **Version 1** (unrecorded) lists never had the chance to include `ytid`, and
+  version 2 read them as having it at the bottom; they still are, so a list
+  that had *Play in-app* turned off keeps an in-app row at the bottom.
+- The oldest single-choice setting, `youtubePlayback`, still maps to the order
+  it meant.
 
 Worth being precise about the two external ones, because the naming promises
 more than the platform can deliver. Nuvio opens an external stream with
@@ -369,39 +380,6 @@ option sends a web URL, which a browser can handle; the SmartTube option sends
 *application* — normally SmartTube on a television running it, since the
 official app is usually absent or SmartTube is the default handler. It is a
 preference, not a guarantee.
-
-**In-app playback is a real MP4** served by this addon at
-`/yt/<videoId>/manifest.mpd`.
-
-The obvious answer was `ytId`, which the protocol documents as playing "using
-the built-in YouTube player", and that is what an earlier version shipped
-alongside an `externalUrl` fallback. Both rows were dead in Nuvio. Reading its
-source settles why: `Stream.kt` parses `ytId` and even defines
-`isYouTube()`, but that helper is called from nowhere, and `getStreamUrl()`
-resolves a stream through `url` and `externalUrl` only. So the `ytId` row
-rendered in the list and did nothing when selected, while the `externalUrl` row
-left the player for the YouTube app. Nuvio *can* play YouTube — its trailers
-do — but that runs through `InAppYouTubeExtractor`, which the addon stream path
-never reaches.
-
-So Newsio resolves the video itself, the same way that extractor does: ask
-YouTube's InnerTube player endpoint as the Android client, which is the only
-one still returning a *progressive* format (itag 18, H.264 360p with the audio
-muxed in). Every higher quality YouTube offers is adaptive — video and audio as
-separate files — which a single stream URL cannot express. The watch page is
-scraped first for an InnerTube key and visitor id; without them the API starts
-answering `LOGIN_REQUIRED` within minutes from a datacenter IP.
-
-**The bytes are proxied, not redirected to.** That is forced rather than
-chosen: the media URL YouTube returns is signed over the IP that requested it
-(`ip` appears in the URL's own `sparams` list), so a URL resolved on the server
-and handed to a television is refused on arrival. Range requests pass through
-in both directions, so seeking works. The cost is bandwidth — 360p news clips,
-so tens of megabytes each.
-
-Two things to know about this. It is 360p, because that is the only muxed
-format YouTube still offers. And it depends on an undocumented internal API,
-so it is the part of this addon most likely to break without warning.
 
 ## Failover
 

@@ -175,8 +175,8 @@ describe("configure page — Generate install link", () => {
         { kind: "preset", id: "world", label: "World" }
       ],
       language: "en",
-      youtubeStreams: ["app", "youtube", "ytid"],
-      youtubeStreamsVersion: 2,
+      youtubeStreams: ["app", "youtube"],
+      youtubeStreamsVersion: 3,
       youtubeNews: true,
       maxAgeDays: 30
     });
@@ -913,10 +913,16 @@ describe("choosing and ordering the YouTube stream options", () => {
 
   test("the default order and selection are what gets generated", () => {
     const page = loadPage();
-    expect(rowIds(page)).toEqual(["app", "youtube", "ytid", "smarttube"]);
+    expect(rowIds(page)).toEqual(["app", "youtube", "smarttube"]);
     fill(page);
     page.submit();
-    expect(generated(page).youtubeStreams).toEqual(["app", "youtube", "ytid"]);
+    expect(generated(page).youtubeStreams).toEqual(["app", "youtube"]);
+  });
+
+  test("the in-app row is labelled plainly", () => {
+    const page = loadPage();
+    expect(rowFor(page, "app").textContent).toContain("Play video in app");
+    expect(rowFor(page, "app").textContent).not.toContain("direct from YouTube");
   });
 
   test("turning one on adds it, in its listed position", () => {
@@ -924,7 +930,7 @@ describe("choosing and ordering the YouTube stream options", () => {
     rowFor(page, "smarttube").querySelector(".yt-option-on").checked = true;
     fill(page);
     page.submit();
-    expect(generated(page).youtubeStreams).toEqual(["app", "youtube", "ytid", "smarttube"]);
+    expect(generated(page).youtubeStreams).toEqual(["app", "youtube", "smarttube"]);
   });
 
   test("turning one off removes it entirely", () => {
@@ -932,26 +938,25 @@ describe("choosing and ordering the YouTube stream options", () => {
     rowFor(page, "app").querySelector(".yt-option-on").checked = false;
     fill(page);
     page.submit();
-    expect(generated(page).youtubeStreams).toEqual(["youtube", "ytid"]);
+    expect(generated(page).youtubeStreams).toEqual(["youtube"]);
   });
 
   test("moving a row up changes the order that is generated", () => {
     const page = loadPage();
     rowFor(page, "smarttube").querySelector(".yt-up").click();
     rowFor(page, "smarttube").querySelector(".yt-up").click();
-    rowFor(page, "smarttube").querySelector(".yt-up").click();
-    expect(rowIds(page)).toEqual(["smarttube", "app", "youtube", "ytid"]);
+    expect(rowIds(page)).toEqual(["smarttube", "app", "youtube"]);
 
     rowFor(page, "smarttube").querySelector(".yt-option-on").checked = true;
     fill(page);
     page.submit();
-    expect(generated(page).youtubeStreams).toEqual(["smarttube", "app", "youtube", "ytid"]);
+    expect(generated(page).youtubeStreams).toEqual(["smarttube", "app", "youtube"]);
   });
 
   test("moving a row down works too", () => {
     const page = loadPage();
     rowFor(page, "app").querySelector(".yt-down").click();
-    expect(rowIds(page)).toEqual(["youtube", "app", "ytid", "smarttube"]);
+    expect(rowIds(page)).toEqual(["youtube", "app", "smarttube"]);
   });
 
   test("the first row cannot move up, nor the last down", () => {
@@ -972,12 +977,12 @@ describe("choosing and ordering the YouTube stream options", () => {
 
   test("turning everything off falls back rather than generating nothing playable", () => {
     const page = loadPage();
-    ["app", "youtube", "ytid", "smarttube"].forEach((id) => {
+    ["app", "youtube", "smarttube"].forEach((id) => {
       rowFor(page, id).querySelector(".yt-option-on").checked = false;
     });
     fill(page);
     page.submit();
-    expect(generated(page).youtubeStreams).toEqual(["app", "youtube", "ytid"]);
+    expect(generated(page).youtubeStreams).toEqual(["app", "youtube"]);
   });
 
   test("none of this raises a script error", () => {
@@ -1087,7 +1092,9 @@ describe("configure page — how far back stories may go", () => {
   });
 });
 
-describe("configure page — direct from YouTube", () => {
+describe("configure page — the option list version, and addons saved before it", () => {
+  const rowIds = (page) =>
+    [...page.document.querySelectorAll("#yt-options .yt-option")].map((r) => r.getAttribute("data-option"));
   const rowFor = (page, id) => page.document.querySelector(`.yt-option[data-option="${id}"]`);
   const rawConfig = (page) => {
     const url = page.document.getElementById("manifest-url").value;
@@ -1097,61 +1104,58 @@ describe("configure page — direct from YouTube", () => {
     page.setKey("youtube", "AIza-key");
     page.check("top");
   };
+  const reconfigure = (saved) =>
+    loadPage({
+      existing: decodeConfig(
+        JSON.stringify({ sources: [{ provider: "youtube", apiKey: "AIza-key" }], topics: ["top"], ...saved })
+      )
+    });
 
   test("the generated URL records the option list's version", () => {
     const page = loadPage();
     fill(page);
     page.submit();
-    expect(rawConfig(page).youtubeStreamsVersion).toBe(2);
+    expect(rawConfig(page).youtubeStreamsVersion).toBe(3);
   });
 
-  test("unticked, it stays off once the URL is read back", () => {
+  test("in-app unticked stays off once the URL is read back", () => {
     const page = loadPage();
-    rowFor(page, "ytid").querySelector(".yt-option-on").checked = false;
+    rowFor(page, "app").querySelector(".yt-option-on").checked = false;
     fill(page);
     page.submit();
-    expect(rawConfig(page).youtubeStreams).toEqual(["app", "youtube"]);
-    expect(decodeConfig(encodeURIComponent(JSON.stringify(rawConfig(page)))).youtubeStreams).toEqual([
-      "app",
-      "youtube"
-    ]);
+    expect(rawConfig(page).youtubeStreams).toEqual(["youtube"]);
+    expect(decodeConfig(encodeURIComponent(JSON.stringify(rawConfig(page)))).youtubeStreams).toEqual(["youtube"]);
   });
 
-  test("reconfiguring an addon that turned it off shows it off, and keeps it off", () => {
-    const existing = decodeConfig(
-      JSON.stringify({
-        sources: [{ provider: "youtube", apiKey: "AIza-key" }],
-        topics: ["top"],
-        youtubeStreams: ["youtube", "app"],
-        youtubeStreamsVersion: 2
-      })
-    );
-    const page = loadPage({ existing });
-    expect(rowFor(page, "ytid").querySelector(".yt-option-on").checked).toBe(false);
+  test("an addon on the version 2 default shows in-app then the YouTube app, and saves that", () => {
+    const page = reconfigure({ youtubeStreams: ["app", "youtube", "ytid"], youtubeStreamsVersion: 2 });
+    expect(rowIds(page)).toEqual(["app", "youtube", "smarttube"]);
+    expect(rowFor(page, "app").querySelector(".yt-option-on").checked).toBe(true);
     page.submit();
-    expect(decodeConfig(encodeURIComponent(JSON.stringify(rawConfig(page)))).youtubeStreams).toEqual([
-      "youtube",
-      "app"
-    ]);
+    expect(rawConfig(page)).toMatchObject({ youtubeStreams: ["app", "youtube"], youtubeStreamsVersion: 3 });
   });
 
-  test("reconfiguring an addon saved before it existed offers it ticked, at the bottom", () => {
-    const existing = decodeConfig(
-      JSON.stringify({ sources: [{ provider: "youtube", apiKey: "AIza-key" }], topics: ["top"], youtubeStreams: ["youtube", "app"] })
-    );
-    const page = loadPage({ existing });
-    expect(rowFor(page, "ytid").querySelector(".yt-option-on").checked).toBe(true);
+  test("an addon that had only direct-from-YouTube in-app gets in-app ticked in its place", () => {
+    const page = reconfigure({ youtubeStreams: ["youtube", "ytid"], youtubeStreamsVersion: 2 });
+    expect(rowIds(page)).toEqual(["youtube", "app", "smarttube"]);
+    expect(rowFor(page, "app").querySelector(".yt-option-on").checked).toBe(true);
     page.submit();
-    expect(rawConfig(page).youtubeStreams).toEqual(["youtube", "app", "ytid"]);
+    expect(rawConfig(page).youtubeStreams).toEqual(["youtube", "app"]);
   });
 
-  test("it can be moved to the top, which is where it goes once Nuvio supports it", () => {
-    const page = loadPage();
-    rowFor(page, "ytid").querySelector(".yt-up").click();
-    rowFor(page, "ytid").querySelector(".yt-up").click();
-    fill(page);
+  test("an addon that had both in-app options off keeps in-app off", () => {
+    const page = reconfigure({ youtubeStreams: ["youtube"], youtubeStreamsVersion: 2 });
+    expect(rowFor(page, "app").querySelector(".yt-option-on").checked).toBe(false);
     page.submit();
-    expect(rawConfig(page).youtubeStreams).toEqual(["ytid", "app", "youtube"]);
+    expect(rawConfig(page).youtubeStreams).toEqual(["youtube"]);
+  });
+
+  test("an addon saved before versions existed keeps the in-app row it has been showing", () => {
+    const page = reconfigure({ youtubeStreams: ["youtube"] });
+    expect(rowIds(page)).toEqual(["youtube", "app", "smarttube"]);
+    expect(rowFor(page, "app").querySelector(".yt-option-on").checked).toBe(true);
+    page.submit();
+    expect(rawConfig(page).youtubeStreams).toEqual(["youtube", "app"]);
     expect(page.errors).toEqual([]);
   });
 });

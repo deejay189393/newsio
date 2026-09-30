@@ -5,8 +5,6 @@ const { normalizeTopics, isPresetTopicId } = require("./topics");
 const { fetchCatalogPage, getArticle } = require("./sources");
 const { normalizeSources, youtubeNewsEnabled, maxAgeDays } = require("./config");
 const { toMetaPreview, toFullMeta, toStreams } = require("./stremioMeta");
-const { currentBaseUrl } = require("./requestContext");
-const { isPlaybackHealthy } = require("./youtubeHealth");
 const { youtubeStreamsOf } = require("./youtubeStreams");
 
 /**
@@ -90,12 +88,10 @@ function createAddonInterface() {
     if (!article) return { streams: [] };
     return {
       streams: toStreams(article, {
-        baseUrl: currentBaseUrl(),
         // Read through the one helper, so an install that still carries the
         // older single choice, or a list saved before an option existed, gets
         // the order it was configured with rather than the default.
-        youtubeStreams: youtubeStreamsOf(config),
-        youtubeHealthy: isPlaybackHealthy()
+        youtubeStreams: youtubeStreamsOf(config)
       }),
       cacheMaxAge: 3600
     };

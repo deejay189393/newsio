@@ -7,63 +7,118 @@ describe("the YouTube stream options", () => {
   const {
     normalizeYoutubeStreams,
     youtubeStreamsOf,
+    orderedYoutubeOptions,
     DEFAULT_YOUTUBE_STREAMS,
-    YOUTUBE_STREAMS_VERSION
+    YOUTUBE_STREAMS_VERSION,
+    OPTION_IDS,
+    RENAMED_OPTIONS
   } = require("../src/youtubeStreams");
   const V = YOUTUBE_STREAMS_VERSION;
 
-  test("nothing saved means in-app first, the YouTube app, then direct from YouTube", () => {
+  test("there are three options: in-app, the YouTube app and SmartTube", () => {
+    expect(OPTION_IDS).toEqual(["app", "youtube", "smarttube"]);
+    expect(RENAMED_OPTIONS).toEqual({ ytid: "app" });
+  });
+
+  test("nothing saved means in-app first, then the YouTube app", () => {
     // SmartTube is off by default: it is a separately installed app, and an
     // option that opens nothing is the dead row this addon keeps removing.
-    // Direct-from-YouTube is on but last until Nuvio ships support for it.
-    expect(DEFAULT_YOUTUBE_STREAMS).toEqual(["app", "youtube", "ytid"]);
-    expect(normalizeYoutubeStreams(undefined)).toEqual(["app", "youtube", "ytid"]);
-    expect(youtubeStreamsOf(undefined)).toEqual(["app", "youtube", "ytid"]);
+    expect(DEFAULT_YOUTUBE_STREAMS).toEqual(["app", "youtube"]);
+    expect(normalizeYoutubeStreams(undefined)).toEqual(["app", "youtube"]);
+    expect(youtubeStreamsOf(undefined)).toEqual(["app", "youtube"]);
+    expect(youtubeStreamsOf({})).toEqual(["app", "youtube"]);
   });
 
-  test("the current version is 2", () => {
-    expect(V).toBe(2);
+  test("the default is a fresh copy, so a caller cannot change it for everyone", () => {
+    const one = normalizeYoutubeStreams(undefined);
+    one.push("smarttube");
+    expect(normalizeYoutubeStreams(undefined)).toEqual(["app", "youtube"]);
+    expect(DEFAULT_YOUTUBE_STREAMS).toEqual(["app", "youtube"]);
   });
 
-  test("a list saved at the current version is kept exactly, including all four", () => {
-    expect(normalizeYoutubeStreams(["ytid", "smarttube", "youtube", "app"], undefined, V)).toEqual([
-      "ytid",
+  test("the current version is 3", () => {
+    expect(V).toBe(3);
+  });
+
+  test("a list saved at the current version is kept exactly", () => {
+    expect(normalizeYoutubeStreams(["smarttube", "youtube", "app"], undefined, V)).toEqual([
       "smarttube",
       "youtube",
       "app"
     ]);
+    expect(normalizeYoutubeStreams(["youtube", "app"], undefined, V)).toEqual(["youtube", "app"]);
   });
 
   test("at the current version a single option is allowed, which is the point of the toggles", () => {
     expect(normalizeYoutubeStreams(["app"], undefined, V)).toEqual(["app"]);
+    expect(normalizeYoutubeStreams(["youtube"], undefined, V)).toEqual(["youtube"]);
     expect(normalizeYoutubeStreams(["smarttube"], undefined, V)).toEqual(["smarttube"]);
-    expect(normalizeYoutubeStreams(["ytid"], undefined, V)).toEqual(["ytid"]);
   });
 
-  test("a list saved before direct-from-YouTube existed gains it at the bottom", () => {
-    // Every addon installed before this has a list and no version: it never
-    // had the chance to include the new option, so it is not "turned off".
-    expect(normalizeYoutubeStreams(["app", "youtube"])).toEqual(["app", "youtube", "ytid"]);
-    expect(normalizeYoutubeStreams(["smarttube", "youtube", "app"])).toEqual([
-      "smarttube",
-      "youtube",
-      "app",
-      "ytid"
-    ]);
-    expect(normalizeYoutubeStreams(["app"])).toEqual(["app", "ytid"]);
-    expect(normalizeYoutubeStreams(["app"], undefined, 1)).toEqual(["app", "ytid"]);
+  test("a later version is read like the current one", () => {
+    expect(normalizeYoutubeStreams(["youtube"], undefined, 4)).toEqual(["youtube"]);
+    expect(normalizeYoutubeStreams(["youtube"], undefined, "3")).toEqual(["youtube"]);
   });
 
-  test("an old list that somehow already names it is not given it twice", () => {
-    expect(normalizeYoutubeStreams(["ytid", "app"])).toEqual(["ytid", "app"]);
+  describe("a list saved at version 2, when direct-from-YouTube was its own option", () => {
+    test("the version 2 default becomes in-app then the YouTube app", () => {
+      expect(normalizeYoutubeStreams(["app", "youtube", "ytid"], undefined, 2)).toEqual(["app", "youtube"]);
+    });
+
+    test("direct-from-YouTube on and the old in-app off: it becomes in-app, in its place", () => {
+      expect(normalizeYoutubeStreams(["youtube", "ytid"], undefined, 2)).toEqual(["youtube", "app"]);
+      expect(normalizeYoutubeStreams(["ytid", "youtube"], undefined, 2)).toEqual(["app", "youtube"]);
+      expect(normalizeYoutubeStreams(["ytid"], undefined, 2)).toEqual(["app"]);
+    });
+
+    test("the old in-app on and direct-from-YouTube off: in-app stays, now as the new one", () => {
+      expect(normalizeYoutubeStreams(["app", "youtube"], undefined, 2)).toEqual(["app", "youtube"]);
+      expect(normalizeYoutubeStreams(["youtube", "app"], undefined, 2)).toEqual(["youtube", "app"]);
+    });
+
+    test("both on: whichever was listed first keeps its place", () => {
+      expect(normalizeYoutubeStreams(["ytid", "youtube", "app"], undefined, 2)).toEqual(["app", "youtube"]);
+      expect(normalizeYoutubeStreams(["youtube", "app", "smarttube", "ytid"], undefined, 2)).toEqual([
+        "youtube",
+        "app",
+        "smarttube"
+      ]);
+    });
+
+    test("both off stays off", () => {
+      expect(normalizeYoutubeStreams(["youtube"], undefined, 2)).toEqual(["youtube"]);
+      expect(normalizeYoutubeStreams(["smarttube", "youtube"], undefined, 2)).toEqual(["smarttube", "youtube"]);
+    });
   });
 
-  test("a version that is not a number is read as old", () => {
-    for (const bad of ["two", null, {}, NaN]) {
-      expect(normalizeYoutubeStreams(["app"], undefined, bad)).toEqual(["app", "ytid"]);
-    }
-    expect(normalizeYoutubeStreams(["app"], undefined, "2")).toEqual(["app"]);
-    expect(normalizeYoutubeStreams(["app"], undefined, 3)).toEqual(["app"]);
+  describe("a list saved at version 1, before direct-from-YouTube existed", () => {
+    // Version 2 read these as having direct-from-YouTube at the bottom, and
+    // that is the row they have been showing since; it is in-app now.
+    test("a list with in-app keeps it where it was", () => {
+      expect(normalizeYoutubeStreams(["app", "youtube"])).toEqual(["app", "youtube"]);
+      expect(normalizeYoutubeStreams(["smarttube", "youtube", "app"])).toEqual(["smarttube", "youtube", "app"]);
+      expect(normalizeYoutubeStreams(["app"], undefined, 1)).toEqual(["app"]);
+    });
+
+    test("a list without in-app keeps the in-app row it gained, at the bottom", () => {
+      expect(normalizeYoutubeStreams(["youtube"])).toEqual(["youtube", "app"]);
+      expect(normalizeYoutubeStreams(["smarttube", "youtube"], undefined, 1)).toEqual([
+        "smarttube",
+        "youtube",
+        "app"
+      ]);
+    });
+
+    test("a version that is not a number is read as version 1", () => {
+      for (const bad of ["two", null, {}, NaN, undefined]) {
+        expect(normalizeYoutubeStreams(["youtube"], undefined, bad)).toEqual(["youtube", "app"]);
+      }
+    });
+  });
+
+  test("a stray direct-from-YouTube id in a current list still means in-app", () => {
+    expect(normalizeYoutubeStreams(["youtube", "ytid"], undefined, V)).toEqual(["youtube", "app"]);
+    expect(normalizeYoutubeStreams(["app", "ytid"], undefined, V)).toEqual(["app"]);
   });
 
   test("unknown ids and duplicates are dropped, order otherwise untouched", () => {
@@ -71,19 +126,22 @@ describe("the YouTube stream options", () => {
       "youtube",
       "app"
     ]);
+    // Inherited object keys are not options, however they are spelled.
+    expect(normalizeYoutubeStreams(["toString", "constructor", "youtube"], undefined, V)).toEqual(["youtube"]);
   });
 
   test("turning everything off falls back rather than leaving nothing to play", () => {
-    expect(normalizeYoutubeStreams([], undefined, V)).toEqual(["app", "youtube", "ytid"]);
-    expect(normalizeYoutubeStreams(["nope"])).toEqual(["app", "youtube", "ytid"]);
+    expect(normalizeYoutubeStreams([], undefined, V)).toEqual(["app", "youtube"]);
+    expect(normalizeYoutubeStreams(["nope"], undefined, V)).toEqual(["app", "youtube"]);
+    expect(normalizeYoutubeStreams([], undefined, 2)).toEqual(["app", "youtube"]);
   });
 
-  test("the older single-choice setting is migrated, not ignored, and gains the new option", () => {
-    // An addon installed before this existed carries youtubePlayback in its
+  test("the older single-choice setting is migrated, not ignored", () => {
+    // An addon installed before lists existed carries youtubePlayback in its
     // URL; ignoring it would silently reorder someone's play button.
-    expect(normalizeYoutubeStreams(undefined, "app")).toEqual(["app", "youtube", "ytid"]);
-    expect(normalizeYoutubeStreams(undefined, "youtube")).toEqual(["youtube", "app", "ytid"]);
-    expect(normalizeYoutubeStreams(undefined, "nonsense")).toEqual(["app", "youtube", "ytid"]);
+    expect(normalizeYoutubeStreams(undefined, "app")).toEqual(["app", "youtube"]);
+    expect(normalizeYoutubeStreams(undefined, "youtube")).toEqual(["youtube", "app"]);
+    expect(normalizeYoutubeStreams(undefined, "nonsense")).toEqual(["app", "youtube"]);
   });
 
   test("an explicit list wins over the legacy setting", () => {
@@ -91,9 +149,27 @@ describe("the YouTube stream options", () => {
   });
 
   test("youtubeStreamsOf reads the list, the legacy setting and the version together", () => {
-    expect(youtubeStreamsOf({ youtubePlayback: "youtube" })).toEqual(["youtube", "app", "ytid"]);
-    expect(youtubeStreamsOf({ youtubeStreams: ["youtube"] })).toEqual(["youtube", "ytid"]);
+    expect(youtubeStreamsOf({ youtubePlayback: "youtube" })).toEqual(["youtube", "app"]);
+    expect(youtubeStreamsOf({ youtubeStreams: ["youtube"] })).toEqual(["youtube", "app"]);
     expect(youtubeStreamsOf({ youtubeStreams: ["youtube"], youtubeStreamsVersion: 2 })).toEqual(["youtube"]);
+    expect(youtubeStreamsOf({ youtubeStreams: ["youtube", "ytid"], youtubeStreamsVersion: 2 })).toEqual([
+      "youtube",
+      "app"
+    ]);
+    expect(youtubeStreamsOf({ youtubeStreams: ["youtube"], youtubeStreamsVersion: 3 })).toEqual(["youtube"]);
+  });
+
+  test("the configure page's rows put the enabled options first, in order", () => {
+    expect(orderedYoutubeOptions(["youtube"]).map((o) => [o.id, o.enabled])).toEqual([
+      ["youtube", true],
+      ["app", false],
+      ["smarttube", false]
+    ]);
+    expect(orderedYoutubeOptions(undefined).map((o) => [o.id, o.enabled])).toEqual([
+      ["app", true],
+      ["youtube", true],
+      ["smarttube", false]
+    ]);
   });
 
   test("a current list survives the round trip, and records its version", () => {
@@ -109,23 +185,38 @@ describe("the YouTube stream options", () => {
     expect(back.youtubeStreamsVersion).toBe(V);
   });
 
-  test("turning direct-from-YouTube off sticks, however many times the config is re-saved", () => {
-    let config = { sources: [CUR], topics: ["top"], youtubeStreams: ["app", "youtube"], youtubeStreamsVersion: V };
+  test("turning in-app off sticks, however many times the config is re-saved", () => {
+    let config = { sources: [CUR], topics: ["top"], youtubeStreams: ["youtube"], youtubeStreamsVersion: V };
     for (let i = 0; i < 3; i++) config = decodeConfig(encodeConfig(config));
-    expect(config.youtubeStreams).toEqual(["app", "youtube"]);
+    expect(config.youtubeStreams).toEqual(["youtube"]);
   });
 
-  test("an install URL from before this version decodes with the new option added", () => {
-    const old = JSON.stringify({ sources: [CUR], topics: ["top"], youtubeStreams: ["youtube", "app"] });
+  test("a version 2 install URL decodes to the new options and is re-saved as version 3", () => {
+    const old = JSON.stringify({
+      sources: [CUR],
+      topics: ["top"],
+      youtubeStreams: ["app", "youtube", "ytid"],
+      youtubeStreamsVersion: 2
+    });
     const back = decodeConfig(old);
-    expect(back.youtubeStreams).toEqual(["youtube", "app", "ytid"]);
+    expect(back.youtubeStreams).toEqual(["app", "youtube"]);
+    expect(back.youtubeStreamsVersion).toBe(V);
+    const again = JSON.parse(decodeURIComponent(encodeConfig(back)));
+    expect(again.youtubeStreams).toEqual(["app", "youtube"]);
+    expect(again.youtubeStreamsVersion).toBe(V);
+  });
+
+  test("an install URL from before versions decodes with the in-app row it has been showing", () => {
+    const old = JSON.stringify({ sources: [CUR], topics: ["top"], youtubeStreams: ["youtube"] });
+    const back = decodeConfig(old);
+    expect(back.youtubeStreams).toEqual(["youtube", "app"]);
     // ...and from then on it is a current list that keeps what it has.
-    expect(decodeConfig(encodeConfig(back)).youtubeStreams).toEqual(["youtube", "app", "ytid"]);
+    expect(decodeConfig(encodeConfig(back)).youtubeStreams).toEqual(["youtube", "app"]);
   });
 
   test("a legacy config round-trips into the migrated list", () => {
     const back = decodeConfig(encodeConfig({ sources: [CUR], topics: ["top"], youtubePlayback: "youtube" }));
-    expect(back.youtubeStreams).toEqual(["youtube", "app", "ytid"]);
+    expect(back.youtubeStreams).toEqual(["youtube", "app"]);
   });
 });
 
@@ -139,8 +230,8 @@ describe("encode / decode round trip", () => {
         { kind: "preset", id: "top", label: "Top Stories" }
       ],
       language: "fr",
-      youtubeStreams: ["app", "youtube", "ytid"],
-      youtubeStreamsVersion: 2,
+      youtubeStreams: ["app", "youtube"],
+      youtubeStreamsVersion: 3,
       youtubeNews: true,
       maxAgeDays: 30
     });
@@ -171,8 +262,8 @@ describe("encode / decode round trip", () => {
       sources: [{ provider: "currents", apiKey: "100%" }],
       topics: [{ kind: "preset", id: "top", label: "Top Stories" }],
       language: "en",
-      youtubeStreams: ["app", "youtube", "ytid"],
-      youtubeStreamsVersion: 2,
+      youtubeStreams: ["app", "youtube"],
+      youtubeStreamsVersion: 3,
       youtubeNews: true,
       maxAgeDays: 30
     });
@@ -183,8 +274,8 @@ describe("encode / decode round trip", () => {
       sources: [],
       topics: [],
       language: "en",
-      youtubeStreams: ["app", "youtube", "ytid"],
-      youtubeStreamsVersion: 2,
+      youtubeStreams: ["app", "youtube"],
+      youtubeStreamsVersion: 3,
       youtubeNews: true,
       maxAgeDays: 30
     });

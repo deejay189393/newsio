@@ -1,11 +1,6 @@
 const path = require("path");
-const { Readable } = require("stream");
 const express = require("express");
 const { decodeConfig } = require("./src/config");
-const { withBaseUrl } = require("./src/requestContext");
-const { resolveVideo, buildDashManifest, ANDROID_CLIENT, VIDEO_ID_RE } = require("./src/youtubeStream");
-const { recordSuccess, recordFailure, isPlaybackOutage } = require("./src/youtubeHealth");
-const { normalizeRange } = require("./src/byteRange");
 const { buildManifest, getUnconfiguredManifest } = require("./src/manifest");
 const { renderConfigurePage } = require("./src/configurePage");
 const { createResourceRouter } = require("./src/addonInterface");
@@ -29,158 +24,7 @@ function invalidConfig(res) {
   return res.status(400).json({ error: "Invalid or corrupted addon configuration." });
 }
 
-// Every handler below can ask what host it is answering on, which the
-// stream handler needs and the SDK does not pass through.
-app.use((req, res, next) => withBaseUrl(getBaseUrl(req), next));
-
 app.use(express.static(path.join(__dirname, "public")));
-
-/**
- * Playing a YouTube story.
- *
- * Three routes, one idea: the bytes are proxied rather than redirected to.
- * That is forced rather than chosen -- the media URLs YouTube hands back are
- * signed over the IP that asked for them (`ip` appears in each URL's own
- * `sparams` list), so a URL resolved here and handed to a television is
- * refused on arrival. Fetching from the same host that resolved is the only
- * arrangement that works.
- *
- *   /yt/<id>/manifest.mpd  the DASH manifest, where the quality lives
- *   /yt/<id>/<itag>        one adaptive format, ranged
- *   /yt/<id>.mp4           the muxed 360p file, for a player without DASH
- */
-/**
- * Report a failed resolve in the terms the player understands.
- *
- * Nuvio decides whether to retry from the HTTP status, and it treats 400,
- * 401, 403, 404 and 410 as fatal -- one attempt and an error on screen.
- * Everything else it retries a few times, after a delay, from
- * `isRetryablePlaybackError`.
- *
- * That distinction matters because our two failure kinds are genuinely
- * different. A private or region-locked video will never play, so 403 is
- * right and retrying it is a waste. Being refused as a suspected bot is
- * transient -- measured repeatedly, the block moves between containers
- * within minutes -- so it goes out as 503, which buys the player's own
- * retries for free. Nothing here asks YouTube for more than before: the
- * resolve is cached, so a retry within the window costs no request at all.
- */
-function resolveFailed(res, videoId, err) {
-  // Remembered so the stream list can lead with the YouTube app while
-  // playback is down, rather than offering a button that fails.
-  recordFailure(err);
-  console.error(`[yt] ${videoId}: ${err.message}`);
-  const own = err.status >= 400 && err.status < 600 ? err.status : 502;
-  const status = isPlaybackOutage(err) ? 503 : own;
-  return res.status(status).json({ error: err.message });
-}
-
-/** Pipe an upstream media response through, Range headers intact. */
-async function pipeMedia(req, res, mediaUrl, fallbackType, contentLength) {
-  const headers = { "User-Agent": ANDROID_CLIENT.userAgent };
-  // Suffix ranges ("the last N bytes") are answered with 416 upstream, and
-  // they are how a player reads an MP4's trailing moov atom to build a seek
-  // index. Rewritten here into the absolute form googlevideo accepts.
-  if (req.headers.range) headers.Range = normalizeRange(req.headers.range, contentLength);
-
-  let upstream;
-  try {
-    upstream = await fetch(mediaUrl, { method: req.method === "HEAD" ? "HEAD" : "GET", headers });
-  } catch (err) {
-    console.error(`[yt] media fetch failed: ${err.message}`);
-    return res.status(502).json({ error: "Could not reach the video." });
-  }
-
-  res.status(upstream.status);
-  res.set("Content-Type", upstream.headers.get("content-type") || fallbackType);
-  res.set("Accept-Ranges", "bytes");
-  ["content-length", "content-range"].forEach((h) => {
-    const value = upstream.headers.get(h);
-    if (value) res.set(h, value);
-  });
-
-  if (req.method === "HEAD" || !upstream.body) return res.end();
-
-  const body = Readable.fromWeb(upstream.body);
-  // The viewer closing the player mid-stream aborts the response; stop
-  // pulling from YouTube rather than filling a socket nobody is reading.
-  res.on("close", () => body.destroy());
-  body.on("error", () => res.destroy());
-  return body.pipe(res);
-}
-
-/** The DASH manifest: separate video and audio, so 1080p is reachable. */
-async function playManifest(req, res) {
-  const { videoId } = req.params;
-  if (!VIDEO_ID_RE.test(videoId)) return res.status(400).json({ error: "Not a YouTube video id." });
-
-  let video;
-  try {
-    video = await resolveVideo(videoId);
-    recordSuccess();
-  } catch (err) {
-    return resolveFailed(res, videoId, err);
-  }
-
-  // No adaptive ladder means nothing to put in a manifest, and an empty
-  // one is a document the player accepts and then cannot play. The muxed
-  // file is right there, so point at it: 360p beats a silent failure.
-  // resolveVideo refuses a video with neither, so reaching here without a
-  // ladder guarantees the muxed file exists.
-  if (!video.adaptive.video.length) return res.redirect(302, `${getBaseUrl(req)}/yt/${videoId}.mp4`);
-
-  const manifest = buildDashManifest({
-    video: video.adaptive.video,
-    audio: video.adaptive.audio,
-    durationSeconds: video.durationSeconds,
-    baseUrl: `${getBaseUrl(req)}/yt/${videoId}`
-  });
-
-  res.set("Content-Type", "application/dash+xml");
-  res.set("Cache-Control", "public, max-age=900");
-  return res.send(manifest);
-}
-
-/** One adaptive format, addressed by the itag the manifest names. */
-async function playFormat(req, res) {
-  const { videoId, itag } = req.params;
-  if (!VIDEO_ID_RE.test(videoId)) return res.status(400).json({ error: "Not a YouTube video id." });
-
-  let video;
-  try {
-    video = await resolveVideo(videoId);
-    recordSuccess();
-  } catch (err) {
-    return resolveFailed(res, videoId, err);
-  }
-
-  const format = video.byItag.get(String(itag));
-  if (!format) return res.status(404).json({ error: "No such format for this video." });
-  return pipeMedia(req, res, format.url, format.mimeType, format.contentLength);
-}
-
-/** The muxed 360p file, kept for players that cannot read a manifest. */
-async function playProgressive(req, res) {
-  const { videoId } = req.params;
-  if (!VIDEO_ID_RE.test(videoId)) return res.status(400).json({ error: "Not a YouTube video id." });
-
-  let video;
-  try {
-    video = await resolveVideo(videoId);
-    recordSuccess();
-  } catch (err) {
-    return resolveFailed(res, videoId, err);
-  }
-
-  if (!video.progressive) return res.status(415).json({ error: "No single-file format for this video." });
-  return pipeMedia(req, res, video.progressive.url, video.progressive.mimeType, video.progressive.contentLength);
-}
-
-app.get("/yt/:videoId/manifest.mpd", playManifest);
-app.get("/yt/:videoId.mp4", playProgressive);
-app.head("/yt/:videoId.mp4", playProgressive);
-app.get("/yt/:videoId/:itag", playFormat);
-app.head("/yt/:videoId/:itag", playFormat);
 
 app.get("/", (req, res) => res.redirect("/configure"));
 
@@ -219,7 +63,7 @@ app.get("/:config/configure", (req, res) => {
 // cache-control headers all per the official addon protocol.
 app.use(createResourceRouter());
 
-module.exports = { app, getBaseUrl, playManifest, playFormat, playProgressive };
+module.exports = { app, getBaseUrl };
 
 /* istanbul ignore next -- exercised for real by test/startup.test.js, which
    boots this file as a child process; coverage instrumentation does not span

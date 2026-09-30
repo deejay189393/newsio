@@ -408,20 +408,12 @@ const YOUTUBE_ID = /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|v\/)|
 /**
  * One of the three ways to watch a YouTube story.
  *
- * In-app points at this addon's own DASH manifest. The other two are
- * external URIs Android routes: a plain watch URL, which a browser can also
- * take, and `vnd.youtube:`, which no browser registers and so can only reach
- * a YouTube application.
+ * In-app is the bare `ytId`, which the app plays by fetching the video
+ * itself. The other two are external URIs Android routes: a plain watch URL,
+ * which a browser can also take, and `vnd.youtube:`, which no browser
+ * registers and so can only reach a YouTube application.
  */
-function buildYoutubeStream(optionId, { article, youtubeId, baseUrl, down }) {
-  // Nothing but the id, deliberately: a client plays a `ytId` stream only
-  // when it has no `url` or `externalUrl` to use instead -- Nuvio resolves
-  // one on the device only when nothing else on the stream can play.
-  if (optionId === "ytid") {
-    const label = `Play video in app, direct from YouTube (${article.sourceName})`;
-    return { name: "Newsio", title: label, description: label, ytId: youtubeId };
-  }
-
+function buildYoutubeStream(optionId, { article, youtubeId }) {
   const external = externalUrlFor(optionId, youtubeId);
   if (external) {
     const label =
@@ -431,18 +423,11 @@ function buildYoutubeStream(optionId, { article, youtubeId, baseUrl, down }) {
     return { name: "Newsio", title: label, description: label, externalUrl: external };
   }
 
-  const label = down
-    ? `Play video in app \u2014 unavailable right now (${article.sourceName})`
-    : `Play video in app (${article.sourceName})`;
-  return {
-    name: "Newsio",
-    title: label,
-    description: down
-      ? "YouTube is refusing to serve this server at the moment. Try one of the other options."
-      : label,
-    url: `${baseUrl}/yt/${youtubeId}/manifest.mpd`,
-    behaviorHints: { filename: `${youtubeId}.mpd` }
-  };
+  // Nothing but the id, deliberately: a client plays a `ytId` stream only
+  // when it has no `url` or `externalUrl` to use instead -- Nuvio resolves
+  // one on the device only when nothing else on the stream can play.
+  const label = `Play video in app (${article.sourceName})`;
+  return { name: "Newsio", title: label, description: label, ytId: youtubeId };
 }
 
 /** The video id behind a YouTube story, or null if this is not one. */
@@ -489,37 +474,23 @@ function toVideoStream(article) {
  * always offered too, as an externalUrl, so reading the full story is one
  * tap away whether or not a video exists.
  *
- * YouTube is the exception and gets its own rows. `ytId` looked like the
- * right answer -- it is what the protocol documents -- but Nuvio resolved a
- * stream through `url` and `externalUrl` only, so a `ytId` row rendered in
- * the list and did nothing when tapped. In-app playback therefore points at
- * this addon's own DASH manifest, which is what makes 1080p possible: the
- * high-quality formats are adaptive, video and audio as separate files, and
- * only a manifest can name both.
+ * YouTube is the exception and gets its own rows, one per way of watching
+ * the reader turned on, in their order. In-app playback is the bare `ytId`
+ * the protocol documents; Nuvio plays it since NuvioMedia/NuvioTV#3693,
+ * resolving the video on the device, and Stremio always has.
  *
- * Nuvio has since learned `ytId` (NuvioMedia/NuvioTV#3693, after
- * 1.1.0-beta.2): it resolves the video on the device, which sidesteps
- * YouTube refusing this server altogether. So a bare `ytId` row is offered
- * too, last for now, while installed Nuvio versions still predate it.
- *
- * Which of the two leads is the user's choice, because in-app playback
- * leans on an undocumented YouTube API. If that breaks, flipping the setting
- * puts the YouTube app back on the play button without waiting for a fix.
+ * Which one leads is the user's choice, because in-app playback leans on the
+ * app's own YouTube extraction. If that breaks, flipping the setting puts
+ * the YouTube app back on the play button without waiting for a fix.
  */
-function toStreams(article, { baseUrl, youtubeStreams, youtubeHealthy = true } = {}) {
-  const youtubeId = article.provider === "youtube" && baseUrl ? youtubeIdOf(article) : null;
+function toStreams(article, { youtubeStreams } = {}) {
+  const youtubeId = article.provider === "youtube" ? youtubeIdOf(article) : null;
   if (youtubeId) {
     // The list arrives already read from the config (see youtubeStreamsOf),
     // so it is taken as saved: reading it as an older version would add back
     // an option the reader turned off.
     const chosen = normalizeYoutubeStreams(youtubeStreams, undefined, YOUTUBE_STREAMS_VERSION);
-    // In-app playback depends on YouTube being willing to serve this server,
-    // and it sometimes is not. While it is refused the option is kept but
-    // sent to the back, so the row the viewer lands on is one that works.
-    const down = !youtubeHealthy;
-    const order = down ? [...chosen.filter((id) => id !== "app"), ...chosen.filter((id) => id === "app")] : chosen;
-
-    return order.map((id) => buildYoutubeStream(id, { article, youtubeId, baseUrl, down }));
+    return chosen.map((id) => buildYoutubeStream(id, { article, youtubeId }));
   }
 
   const streams = [];
