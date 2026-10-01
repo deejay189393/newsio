@@ -92,6 +92,9 @@ async function fetchCatalogPage(
 
   for (const { source, provider } of candidates) {
     try {
+      // The age limit is for news. A provider can say a fetch is not news --
+      // YouTube searched as a general catalog -- and then it is not applied.
+      const ageLimited = !provider.isAgeLimited || provider.isAgeLimited({ query, youtubeNews });
       const page = await provider.fetchPage({
         apiKey: source.apiKey,
         topic,
@@ -99,12 +102,14 @@ async function fetchCatalogPage(
         language,
         skip,
         youtubeNews,
-        maxAgeDays
+        maxAgeDays: ageLimited ? maxAgeDays : undefined
       });
       // The reader's age limit, applied to every source alike. Before the
       // empty check on purpose: a source whose first page is all too old
       // has nothing to show, and yields to the next like any empty one.
-      page.articles = page.articles.filter((article) => isWithinMaxAge(article, maxAgeDays, now));
+      if (ageLimited) {
+        page.articles = page.articles.filter((article) => isWithinMaxAge(article, maxAgeDays, now));
+      }
 
       if (skip === 0 && page.articles.length === 0 && !page.truncated) {
         attempts.push({ provider: provider.id, outcome: "empty" });
