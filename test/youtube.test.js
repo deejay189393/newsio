@@ -691,13 +691,31 @@ describe("the reader's age limit, sent to YouTube up front", () => {
     }
   });
 
-  test("goes out with the search, for a news search and a plain one alike", async () => {
+  test("goes out with a news search, preset or the reader's own", async () => {
     jest.spyOn(Date, "now").mockReturnValue(NOW);
     const spy = mockFetch(mockPage(["aaaaaaaaaaa"]), mockPage(["bbbbbbbbbbb"]));
     await youtube.fetchPage({ apiKey: "k", topic: "world", language: "en", skip: 0, maxAgeDays: 7 });
-    await youtube.fetchPage({ apiKey: "k", query: "slow horses", language: "en", skip: 0, youtubeNews: false, maxAgeDays: 7 });
+    await youtube.fetchPage({ apiKey: "k", query: "arsenal", language: "en", skip: 0, youtubeNews: true, maxAgeDays: 7 });
     expect(paramsOf(spy, 0).publishedAfter).toBe("2026-09-17T12:00:00.000Z");
     expect(paramsOf(spy, 2).publishedAfter).toBe("2026-09-17T12:00:00.000Z");
+  });
+
+  test("is left off a general search, which ranks the best match from any date", async () => {
+    // Measured: "slow horses" ranks the show's 2022 trailer first.
+    jest.spyOn(Date, "now").mockReturnValue(NOW);
+    const spy = mockFetch(mockPage(["aaaaaaaaaaa"]));
+    await youtube.fetchPage({ apiKey: "k", query: "slow horses", language: "en", skip: 0, youtubeNews: false, maxAgeDays: 7 });
+    expect(paramsOf(spy, 0).publishedAfter).toBeUndefined();
+    expect(paramsOf(spy, 0).order).toBe("relevance");
+  });
+
+  test("a general search is one search whatever the limit, so it is cached once", async () => {
+    jest.spyOn(Date, "now").mockReturnValue(NOW);
+    const spy = mockFetch(mockPage(["aaaaaaaaaaa"]));
+    await youtube.fetchPage({ apiKey: "k", query: "slow horses", language: "en", skip: 0, youtubeNews: false, maxAgeDays: 7 });
+    await youtube.fetchPage({ apiKey: "k", query: "slow horses", language: "en", skip: 0, youtubeNews: false, maxAgeDays: 30 });
+    await youtube.fetchPage({ apiKey: "k", query: "slow horses", language: "en", skip: 0, youtubeNews: false });
+    expect(spy).toHaveBeenCalledTimes(2);
   });
 
   test("is left off when the caller gives no limit", async () => {
@@ -721,5 +739,24 @@ describe("the reader's age limit, sent to YouTube up front", () => {
     now.mockReturnValue(NOW + 10 * 60 * 1000);
     await youtube.fetchPage({ apiKey: "k", topic: "world", language: "en", skip: 0, maxAgeDays: 7 });
     expect(spy).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("which YouTube fetches the reader's age limit applies to", () => {
+  test("a general search is the reader's own text with news switched off", () => {
+    expect(youtube.isGeneralSearch({ query: "slow horses", youtubeNews: false })).toBe(true);
+    expect(youtube.isGeneralSearch({ query: "slow horses", youtubeNews: true })).toBe(false);
+    expect(youtube.isGeneralSearch({ query: "slow horses" })).toBe(false);
+    // The built-in topics are news by definition, whatever the switch says.
+    expect(youtube.isGeneralSearch({ query: undefined, youtubeNews: false })).toBe(false);
+    expect(youtube.isGeneralSearch({ query: "", youtubeNews: false })).toBe(false);
+    expect(youtube.isGeneralSearch()).toBe(false);
+  });
+
+  test("the limit applies to everything except a general search", () => {
+    expect(youtube.isAgeLimited({ query: "slow horses", youtubeNews: false })).toBe(false);
+    expect(youtube.isAgeLimited({ query: "slow horses", youtubeNews: true })).toBe(true);
+    expect(youtube.isAgeLimited({ youtubeNews: false })).toBe(true);
+    expect(youtube.isAgeLimited({})).toBe(true);
   });
 });

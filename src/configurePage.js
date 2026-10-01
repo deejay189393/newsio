@@ -101,7 +101,8 @@ function youtubeStreamsField(chosen) {
 /**
  * Whether YouTube searches stay on news. On by default; off turns the
  * user's own topics and the search box into plain YouTube searches, for
- * anyone using the addon as a general YouTube catalog.
+ * anyone using the addon as a general YouTube catalog -- ranked by
+ * relevance and not held to the age limit, which is a news setting.
  */
 function youtubeNewsField(enabled) {
   return `
@@ -110,7 +111,7 @@ function youtubeNewsField(enabled) {
             <input type="checkbox" id="yt-news"${enabled ? " checked" : ""} />
             <span>
               <strong>Keep searches to news</strong>
-              <em>Adds &ldquo;news&rdquo; to your own catalogs and to search, newest first. Turn off to use YouTube as a general catalog: searched as typed, most relevant first, any length. The built-in topics stay news either way.</em>
+              <em>Adds &ldquo;news&rdquo; to your own catalogs and to search, newest first. Turn off to use YouTube as a general catalog: searched as typed, most relevant first, any length, from any date. The built-in topics stay news either way.</em>
             </span>
           </label>
         </div>`;
@@ -397,6 +398,8 @@ function renderConfigurePage({ baseUrl, existing }) {
       <div class="hint" id="max-age-hint">
         Anything older is left out of every catalog and of search, whichever source it came from.
         0 shows only the last 24 hours. The default is ${DEFAULT_MAX_AGE_DAYS}. There is no upper limit.
+        YouTube with &ldquo;Keep searches to news&rdquo; turned off is the exception: your own topics
+        and search there show the best matches from any date.
       </div>
     </div>
 

@@ -3,6 +3,7 @@ const { fetchCatalogPage, getArticle, usableSources, isExhausted, markExhausted,
 const currents = require("../src/providers/currents");
 const newsdata = require("../src/providers/newsdata");
 const gnews = require("../src/providers/gnews");
+const youtube = require("../src/providers/youtube");
 
 beforeEach(() => {
   clearAllCaches();
@@ -13,6 +14,7 @@ beforeEach(() => {
 const CUR = { provider: "currents", apiKey: "cur-key" };
 const ND = { provider: "newsdata", apiKey: "nd-key" };
 const GN = { provider: "gnews", apiKey: "gn-key" };
+const YT = { provider: "youtube", apiKey: "yt-key" };
 
 const err = (status, message = "boom") => Object.assign(new Error(message), { status });
 const pageOf = (prefix, n = 20) => ({
@@ -455,5 +457,62 @@ describe("the reader's age limit", () => {
     expect(page.provider).toBe("currents");
     expect(page.articles).toEqual([]);
     expect(nd).not.toHaveBeenCalled();
+  });
+});
+
+describe("YouTube as a general catalog is not held to the age limit", () => {
+  const NOW = Date.parse("2026-09-25T12:00:00Z");
+  const DAY = 24 * 60 * 60 * 1000;
+  const aged = (id, days) => ({ id, title: id, pubDate: new Date(NOW - days * DAY).toISOString() });
+  const pageWith = (...articles) => ({ articles, hasMore: true, truncated: false });
+
+  beforeEach(() => {
+    jest.spyOn(Date, "now").mockReturnValue(NOW);
+  });
+
+  test("a search with news off keeps the best matches from any date", async () => {
+    stub(youtube, async () => pageWith(aged("trailer", 1673), aged("season", 43), aged("recap", 1)));
+    const page = await fetchCatalogPage([YT], { query: "slow horses", language: "en", youtubeNews: false, maxAgeDays: 30 });
+    expect(page.articles.map((a) => a.id)).toEqual(["trailer", "season", "recap"]);
+  });
+
+  test("and YouTube is not asked to cut them off either", async () => {
+    const y = stub(youtube, async () => pageWith(aged("recap", 1)));
+    await fetchCatalogPage([YT], { query: "slow horses", language: "en", youtubeNews: false, maxAgeDays: 30 });
+    expect(y).toHaveBeenCalledWith(expect.objectContaining({ maxAgeDays: undefined, youtubeNews: false }));
+  });
+
+  test("a first page of older videos is a real answer, not an empty one to fail over from", async () => {
+    stub(youtube, async () => pageWith(aged("documentary", 900)));
+    const nd = stub(newsdata, async () => pageWith(aged("fresh", 1)));
+    const page = await fetchCatalogPage([YT, ND], { query: "chernobyl", language: "en", youtubeNews: false, maxAgeDays: 30 });
+    expect(page.provider).toBe("youtube");
+    expect(page.articles.map((a) => a.id)).toEqual(["documentary"]);
+    expect(nd).not.toHaveBeenCalled();
+  });
+
+  test("with news on, YouTube searches keep the limit", async () => {
+    const y = stub(youtube, async () => pageWith(aged("old", 45), aged("new", 1)));
+    const page = await fetchCatalogPage([YT], { query: "arsenal", language: "en", youtubeNews: true, maxAgeDays: 30 });
+    expect(page.articles.map((a) => a.id)).toEqual(["new"]);
+    expect(y).toHaveBeenCalledWith(expect.objectContaining({ maxAgeDays: 30 }));
+  });
+
+  test("the built-in topics keep the limit, since they are news whatever the switch says", async () => {
+    const y = stub(youtube, async () => pageWith(aged("old", 45), aged("new", 1)));
+    const page = await fetchCatalogPage([YT], { topic: "technology", language: "en", youtubeNews: false, maxAgeDays: 30 });
+    expect(page.articles.map((a) => a.id)).toEqual(["new"]);
+    expect(y).toHaveBeenCalledWith(expect.objectContaining({ maxAgeDays: 30 }));
+  });
+
+  test("when YouTube fails over, the news source that answers keeps the limit", async () => {
+    stub(youtube, async () => {
+      throw err(403, "quotaExceeded");
+    });
+    const n = stub(newsdata, async () => pageWith(aged("old", 45), aged("new", 1)));
+    const page = await fetchCatalogPage([YT, ND], { query: "slow horses", language: "en", youtubeNews: false, maxAgeDays: 30 });
+    expect(page.provider).toBe("newsdata");
+    expect(page.articles.map((a) => a.id)).toEqual(["new"]);
+    expect(n).toHaveBeenCalledWith(expect.objectContaining({ maxAgeDays: 30 }));
   });
 });

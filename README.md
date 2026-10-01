@@ -63,8 +63,13 @@ Bloomberg's 241,766 on the same query.
 searches to news* switch, on by default. Turn it off and your own topics and
 the search box become plain YouTube searches: the query goes in as typed (no
 "news" appended), ranked **most relevant first**, at **any length**, with **no
-view floor** — searching "Slow Horses" then finds the trailers, clips and
-episodes rather than coverage of them. What keeps a result playable stays:
+view floor**, and **from any date** — the age limit below is a news setting and
+does not apply. Searching "Slow Horses" then finds the trailers, clips and
+episodes rather than coverage of them: measured, it ranks the show's 2022
+trailer first and the newest season's trailer second, both older than the
+default 30 days. Relevance ranking still favours recent uploads when the query
+asks for them — "latest New York City news" put videos 1 to 5 days old at the
+top. What keeps a result playable stays:
 embeddable only, no unaired premieres, and your language. The built-in topics
 are news subjects by definition and stay news catalogs either way. The
 setting is stored only when it is off (`"youtubeNews": false`), so every
@@ -269,7 +274,12 @@ URL contains every API key you entered, so don't share it publicly.**
 
 The **Options** card sets how many days back a story may be and still be
 shown: a whole number from 0 up, default **30**, no upper limit. It applies to
-every catalog and to search, whichever source served the story.
+every catalog and to search, whichever source served the story — with one
+exception: YouTube with *Keep searches to news* turned off. Your own topics and
+search there are YouTube used as a general catalog, ranked by relevance, and
+show the best matches from any date. The built-in topics are news and keep the
+limit, and if such a search fails over to a news source, that source keeps it
+too.
 
 Days count back from now rather than by calendar date, because the server
 cannot know your time zone: **0 is the last 24 hours**, 1 the last 48, 30 the
@@ -277,10 +287,9 @@ last 31 days. A story that carries no date is kept, since nothing says it is
 old. A source whose first page has nothing recent enough counts as empty and
 yields to the next source, like any empty one.
 
-YouTube is also asked for the window up front (`publishedAfter`, rounded down
-to the hour so cached pages stay reusable), so the 50 results a search costs
-are 50 that can be shown — which matters most for plain searches ranked by
-relevance, whose best matches are often years old.
+For news searches YouTube is also asked for the window up front
+(`publishedAfter`, rounded down to the hour so cached pages stay reusable), so
+the 50 results a search costs are 50 that can be shown.
 
 ## Topics and catalog order
 

@@ -292,6 +292,28 @@ function publishedAfter(maxAgeDays, now = Date.now()) {
   return new Date(Math.floor(cutoff / HOUR_MS) * HOUR_MS).toISOString();
 }
 
+/**
+ * A reader's own topic or search with news switched off: YouTube used as a
+ * general catalog rather than a news feed.
+ *
+ * Such a search is ranked by relevance and is not held to the reader's age
+ * limit. That limit is a news setting -- it keeps a feed of bulletins
+ * current -- and for a film, a series or a documentary the best match is
+ * often years old: measured, "slow horses" ranks the show's original trailer
+ * first, from 2022, and the newest season's trailer second, 43 days old,
+ * both outside the default 30 days. Relevance ranking still favours recent
+ * uploads when the query asks for them: "latest New York City news" put
+ * results 1 to 5 days old at the top.
+ */
+function isGeneralSearch({ query, youtubeNews = true } = {}) {
+  return Boolean(query) && youtubeNews === false;
+}
+
+/** Whether the reader's age limit applies to a fetch with these options. */
+function isAgeLimited(options) {
+  return !isGeneralSearch(options);
+}
+
 async function fetchPage({ apiKey, topic, query, language, skip, youtubeNews = true, maxAgeDays }) {
   if (!apiKey) {
     const err = new Error("Missing YouTube API key");
@@ -316,11 +338,11 @@ async function fetchPage({ apiKey, topic, query, language, skip, youtubeNews = t
   // tuning below exists to keep out junk bulletins, and for a film or a
   // series it would keep out the trailer and the full episodes instead.
   // The preset topics are news subjects by definition and stay as they are.
-  const plain = Boolean(query) && youtubeNews === false;
+  const plain = isGeneralSearch({ query, youtubeNews });
   const q = query ? (plain ? query : `${query} news`) : terms;
   const category = query ? undefined : NEWS_CATEGORY;
   const wantedLanguage = primaryLanguage(language);
-  const after = publishedAfter(maxAgeDays);
+  const after = plain ? undefined : publishedAfter(maxAgeDays);
   const queryKey = JSON.stringify({ q, category: category || null, language, plain, after: after || null });
 
   const loadPage = async (index) => {
@@ -411,6 +433,8 @@ module.exports = {
   categories: CATEGORIES,
   languages: LANGUAGES,
   fetchPage,
+  isAgeLimited,
+  isGeneralSearch,
   getArticleById,
   normalize,
   exclusionReason,

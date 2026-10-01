@@ -468,6 +468,7 @@ describe("keeping YouTube searches to news, on the page", () => {
     const card = youtubeCard(render(null));
     expect(card).toContain("Keep searches to news");
     expect(card).toContain("most relevant first");
+    expect(card).toContain("from any date");
     expect(card).toContain("The built-in topics stay news either way.");
   });
 });
@@ -505,5 +506,11 @@ describe("the Options card", () => {
     expect(markup).toContain("Only show stories from the last &hellip; days");
     expect(markup).toContain("every catalog and of search, whichever source it came from");
     expect(markup).toContain("0 shows only the last 24 hours");
+  });
+
+  test("names the one exception: YouTube used as a general catalog", () => {
+    const hint = render(null).match(/<div class="hint" id="max-age-hint">([\s\S]*?)<\/div>/)[1];
+    expect(hint).toContain("YouTube with &ldquo;Keep searches to news&rdquo; turned off is the exception");
+    expect(hint).toContain("best matches from any date");
   });
 });
